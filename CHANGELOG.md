@@ -4,6 +4,10 @@ Progress log for `ipping-backend`, newest first. Each entry is one small, tested
 
 ## Unreleased
 
+## v0.1.0 (2026-11-04)
+
+First release. Everything below shipped in it.
+
 ### 2026-11-04: release tags and published installers
 - Release workflow rebuilt: started by a tag or by hand with a dry-run switch, checks the tag against
   `pyproject.toml`, publishes only from `main`, re-runnable. A test keeps `__version__` equal to the

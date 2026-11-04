@@ -118,7 +118,7 @@ Small steps, each one committed and logged in [CHANGELOG.md](CHANGELOG.md).
 - [x] Dockerfile, CI (lint, types, tests, contract-drift check) and Docker Hub publishing
 - [x] API tests also run on PostgreSQL
 - [x] Release workflow: tag or manual run, dry run, version check, image + wheel + lock + contracts
-- [ ] First tagged release (see RELEASING.md)
+- [x] First tagged release: v0.1.0
 - [ ] Per-session / per-IP quota tuning from real traffic
 - [ ] TCP, HTTP and traceroute probes
 - [ ] DNS comparison across nodes
