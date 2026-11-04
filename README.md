@@ -89,7 +89,7 @@ probe budgets, target denylist, retention) live in the database and are edited t
 Small steps, each one committed and logged in [CHANGELOG.md](CHANGELOG.md).
 
 - [ ] Node protocol v1 and contracts (`contracts/`)
-- [ ] Target parsing and destination policy
+- [x] Target parsing and destination policy
 - [ ] Database schema and migrations
 - [ ] Measurement engine, REST API, SSE, node WebSocket, admin and setup
 - [ ] Dockerfile and CI (lint, types, tests, contract-drift check)
