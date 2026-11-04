@@ -1,0 +1,59 @@
+[project]
+name = "ipping-backend"
+version = "0.1.0"
+description = "API, node coordination and result aggregation for ipping"
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+dependencies = [
+    "fastapi>=0.115,<1",
+    "uvicorn[standard]>=0.32,<1",
+    "sqlalchemy[asyncio]>=2.0.36,<2.1",
+    "asyncpg>=0.30,<1",
+    "alembic>=1.14,<2",
+    "pydantic>=2.9,<3",
+    "pydantic-settings>=2.6,<3",
+    "argon2-cffi>=23.1,<26",
+]
+
+[project.scripts]
+ipping-backend = "ipping_backend.cli:main"
+
+[dependency-groups]
+dev = [
+    "aiosqlite>=0.20",
+    "httpx>=0.27",
+    "pytest>=8",
+    "ruff>=0.8",
+    "mypy>=1.13",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/ipping_backend"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"
+filterwarnings = ["error::pytest.PytestUnraisableExceptionWarning"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC", "S"]
+ignore = ["S101", "B008", "ASYNC109", "E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S105", "S106", "S311"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+plugins = ["pydantic.mypy"]
+files = ["src"]
