@@ -99,6 +99,14 @@ probe budgets, target denylist, retention) live in the database and are edited t
   backend process (`serve` enforces `workers=1`). Scaling out needs shared routing first.
 * Only ICMP ping exists so far; location estimation is not implemented.
 
+## Releases
+
+Tags are `vX.Y.Z` and must match `pyproject.toml`. A release publishes the versioned image, the
+wheel, a hash-locked `requirements.lock` (used by the central installer's direct mode), the API and
+protocol contracts, and `SHA256SUMS`. Releasing is described in
+[RELEASING.md](https://github.com/ip-ping/ipping/blob/main/RELEASING.md); the backend is released
+first because the application release pins it.
+
 ## Roadmap
 
 Small steps, each one committed and logged in [CHANGELOG.md](CHANGELOG.md).
@@ -109,7 +117,8 @@ Small steps, each one committed and logged in [CHANGELOG.md](CHANGELOG.md).
 - [x] Measurement engine, REST API, SSE, node WebSocket, admin and setup
 - [x] Dockerfile, CI (lint, types, tests, contract-drift check) and Docker Hub publishing
 - [x] API tests also run on PostgreSQL
-- [ ] First tagged release (versioned image, wheel, contracts, checksums)
+- [x] Release workflow: tag or manual run, dry run, version check, image + wheel + lock + contracts
+- [ ] First tagged release (see RELEASING.md)
 - [ ] Per-session / per-IP quota tuning from real traffic
 - [ ] TCP, HTTP and traceroute probes
 - [ ] DNS comparison across nodes

@@ -1,21 +1,84 @@
 name: Release
 
-# A version tag (v1.2.3) publishes the versioned image and a GitHub release holding the wheel,
-# the API / protocol contracts and checksums. `latest` is owned by docker.yml (tracks main).
+# Cut a release in either of two ways; both take the same path:
+#   git tag v0.1.0 && git push origin v0.1.0
+#   gh workflow run release.yml -f version=0.1.0 -f dry_run=false      (or the Actions tab)
+# A dry run builds and checks everything and publishes nothing. See RELEASING.md in the ipping
+# repository for the order and rules.
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, without the v (0.1.0, or 0.2.0-rc.1 for a preview)"
+        required: true
+        type: string
+      dry_run:
+        description: "Build and check everything, publish nothing"
+        required: true
+        type: boolean
+        default: true
 
 permissions:
   contents: read
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
+  prepare:
+    name: Work out the version
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.v.outputs.tag }}
+      version: ${{ steps.v.outputs.version }}
+      minor: ${{ steps.v.outputs.minor }}
+      prerelease: ${{ steps.v.outputs.prerelease }}
+      publish: ${{ steps.v.outputs.publish }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - id: v
+        env:
+          EVENT: ${{ github.event_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+          INPUT_DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -eu
+          if [ "$EVENT" = push ]; then
+            tag="$GITHUB_REF_NAME"; publish=true
+          else
+            tag="v${INPUT_VERSION#v}"
+            if [ "$INPUT_DRY_RUN" = true ]; then publish=false; else publish=true; fi
+            if [ "$publish" = true ] && [ "$GITHUB_REF" != refs/heads/main ]; then
+              echo "::error::Releases are cut from main; this run is on $GITHUB_REF."; exit 1
+            fi
+          fi
+          version="${tag#v}"
+          printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$' \
+            || { echo "::error::'$tag' is not a version like v1.2.3 or v1.2.3-rc.1"; exit 1; }
+          file="$(sed -n 's/^version = "\(.*\)"/\1/p' pyproject.toml | head -n 1)"
+          [ "${version%%-*}" = "$file" ] \
+            || { echo "::error::$tag does not match the version in pyproject.toml ($file). Bump it and merge first."; exit 1; }
+          prerelease=false
+          case "$version" in *-*) prerelease=true ;; esac
+          {
+            echo "tag=$tag"; echo "version=$version"; echo "minor=${version%.*}"
+            echo "prerelease=$prerelease"; echo "publish=$publish"
+          } >> "$GITHUB_OUTPUT"
+          echo "Releasing $tag (prerelease: $prerelease, publish: $publish)" >> "$GITHUB_STEP_SUMMARY"
+
   ci:
+    name: Checks
+    needs: prepare
     uses: ./.github/workflows/ci.yml
 
   image:
-    name: Publish image to Docker Hub
-    needs: ci
+    name: Versioned image
+    needs: [prepare, ci]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -23,58 +86,66 @@ jobs:
           persist-credentials: false
       - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+      - name: Log in to Docker Hub
+        if: needs.prepare.outputs.publish == 'true'
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - id: meta
-        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
-        with:
-          # Set the org/repo variable DOCKERHUB_NAMESPACE if the Docker Hub namespace differs
-          # from the login name.
-          images: ${{ vars.DOCKERHUB_NAMESPACE || secrets.DOCKERHUB_USERNAME }}/ipping-backend
-          tags: |
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}},enable=${{ !contains(github.ref_name, '-') }}
-      - id: build
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: .
           platforms: linux/amd64,linux/arm64
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          push: ${{ needs.prepare.outputs.publish == 'true' }}
+          # `latest` is owned by docker.yml (it tracks main); a release adds 1.2.3 and, for stable
+          # releases, 1.2.
+          tags: |
+            ${{ vars.DOCKERHUB_NAMESPACE || secrets.DOCKERHUB_USERNAME }}/ipping-backend:${{ needs.prepare.outputs.version }}
+            ${{ needs.prepare.outputs.prerelease == 'false' && format('{0}/ipping-backend:{1}', vars.DOCKERHUB_NAMESPACE || secrets.DOCKERHUB_USERNAME, needs.prepare.outputs.minor) || '' }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
-      - name: Record the image digest
-        run: echo "${{ steps.build.outputs.digest }}" > image-digest.txt
-      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: image-digest
-          path: image-digest.txt
 
-  github-release:
-    name: GitHub release with wheel and contracts
-    needs: [ci, image]
+  release:
+    name: GitHub release
+    needs: [prepare, ci, image]
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      TAG: ${{ needs.prepare.outputs.tag }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      PRERELEASE: ${{ needs.prepare.outputs.prerelease }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
-      - run: uv build --wheel
-      - name: Hash-locked runtime requirements, for direct installs
-        run: uv export --frozen --no-dev --no-emit-project --no-header --format requirements-txt -o dist/requirements.lock
-      - name: Bundle contracts and checksums
+      - name: Build the release files
         run: |
-          tar -czf dist/ipping-backend-contracts-${{ github.ref_name }}.tar.gz contracts
-          cd dist && sha256sum -- * > SHA256SUMS
-      - name: Create the release
-        env:
-          GH_TOKEN: ${{ github.token }}
+          set -eu
+          uv build --wheel
+          # Runtime dependencies with hashes: the central installer's direct mode installs these
+          # with --require-hashes before adding the wheel.
+          uv export --frozen --no-dev --no-emit-project --no-header --format requirements-txt -o dist/requirements.lock
+          tar -czf "dist/ipping-backend-contracts-${TAG}.tar.gz" contracts
+          compgen -G "dist/ipping_backend-${VERSION%%-*}-*.whl" >/dev/null || { echo "::error::the wheel does not carry version ${VERSION%%-*}"; exit 1; }
+          (cd dist && sha256sum -- * > SHA256SUMS)
+          cat dist/SHA256SUMS
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-files
+          path: dist/*
+      - name: Publish the release
+        if: needs.prepare.outputs.publish == 'true'
         run: |
-          args=(--generate-notes)
-          case "${GITHUB_REF_NAME}" in *-*) args+=(--prerelease) ;; esac
-          gh release create "${GITHUB_REF_NAME}" dist/* "${args[@]}"
+          set -eu
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            # A re-run after a partial failure: replace the files, keep the release.
+            gh release upload "$TAG" dist/* --clobber
+          else
+            args=(--generate-notes --target "$GITHUB_SHA")
+            if [ "$PRERELEASE" = true ]; then args+=(--prerelease); else args+=(--latest); fi
+            gh release create "$TAG" dist/* "${args[@]}"
+          fi

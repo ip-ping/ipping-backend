@@ -4,6 +4,11 @@ Progress log for `ipping-backend`, newest first. Each entry is one small, tested
 
 ## Unreleased
 
+### 2026-11-04: release tags and published installers
+- Release workflow rebuilt: started by a tag or by hand with a dry-run switch, checks the tag against
+  `pyproject.toml`, publishes only from `main`, re-runnable. A test keeps `__version__` equal to the
+  `pyproject.toml` version.
+
 ### 2026-11-04: release assets for installers
 - Releases now also publish `requirements.lock`: the runtime dependencies with hashes, which the
   central installer's direct mode installs with `--require-hashes` before adding the wheel.
