@@ -4,6 +4,18 @@ Progress log for `ipping-backend`, newest first. Each entry is one small, tested
 
 ## Unreleased
 
+### 2026-11-04: estimated network location
+- `GET /api/v1/measurements/{id}/location`: where the target appears to be, from the nodes' smallest
+  round-trip times and positions. Speed-of-light limits exclude impossible places; remaining cities are
+  ranked with a fitted path-length factor; contradictory evidence is reported as inconclusive and thin
+  evidence as insufficient, with the evidence, alternatives, warnings and limitations attached.
+- Stored per finished measurement (`location_estimates`, migration 0002) and redone only when the
+  model version changes. Node snapshots now record whether an administrator verified the coordinates.
+- City list from GeoNames (CC BY 4.0, `NOTICE`), rebuilt by `scripts/build_gazetteer.py`.
+- Checked on synthetic paths: 399 randomized trials, every `strong` within 218 km, every `moderate`
+  within 272 km, `low` median 352 km (worst 8,232 km); consistent data is never called contradictory.
+  Real-world accuracy has not been measured.
+
 ### 2026-11-04: signed releases
 - Release files get signed build-provenance attestations (`gh attestation verify`); takes effect with the next release.
 

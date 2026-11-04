@@ -202,6 +202,24 @@
         "title": "AdminNode",
         "type": "object"
       },
+      "AlternativeOut": {
+        "properties": {
+          "distance_km": {
+            "description": "From the likely place",
+            "title": "Distance Km",
+            "type": "integer"
+          },
+          "place": {
+            "$ref": "#/components/schemas/PlaceOut"
+          }
+        },
+        "required": [
+          "place",
+          "distance_km"
+        ],
+        "title": "AlternativeOut",
+        "type": "object"
+      },
       "AuditOut": {
         "properties": {
           "action": {
@@ -259,6 +277,41 @@
           "source_ip"
         ],
         "title": "AuditOut",
+        "type": "object"
+      },
+      "ClosestOut": {
+        "properties": {
+          "max_distance_km": {
+            "description": "A physical limit: light cannot cover more in that time",
+            "title": "Max Distance Km",
+            "type": "integer"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "node_name": {
+            "title": "Node Name",
+            "type": "string"
+          },
+          "rtt_ms": {
+            "title": "Rtt Ms",
+            "type": "number"
+          },
+          "typical_distance_km": {
+            "description": "At the speed of light in fibre; paths are usually longer",
+            "title": "Typical Distance Km",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "node_id",
+          "node_name",
+          "rtt_ms",
+          "max_distance_km",
+          "typical_distance_km"
+        ],
+        "title": "ClosestOut",
         "type": "object"
       },
       "CreateMeasurementRequest": {
@@ -518,6 +571,50 @@
         "title": "EnrollResponse",
         "type": "object"
       },
+      "EvidenceOut": {
+        "properties": {
+          "latitude": {
+            "title": "Latitude",
+            "type": "number"
+          },
+          "longitude": {
+            "title": "Longitude",
+            "type": "number"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "node_name": {
+            "title": "Node Name",
+            "type": "string"
+          },
+          "rtt_ms": {
+            "title": "Rtt Ms",
+            "type": "number"
+          },
+          "used": {
+            "description": "False for nodes beyond the twelve nearest, which the estimate ignores",
+            "title": "Used",
+            "type": "boolean"
+          },
+          "verified": {
+            "title": "Verified",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "node_id",
+          "node_name",
+          "latitude",
+          "longitude",
+          "rtt_ms",
+          "verified",
+          "used"
+        ],
+        "title": "EvidenceOut",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -529,6 +626,121 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "LocationEstimateOut": {
+        "properties": {
+          "alternatives": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/AlternativeOut"
+            },
+            "title": "Alternatives",
+            "type": "array"
+          },
+          "closest": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ClosestOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "evidence": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/EvidenceOut"
+            },
+            "title": "Evidence",
+            "type": "array"
+          },
+          "likely": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlaceOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "limitations": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Limitations",
+            "type": "array"
+          },
+          "model_version": {
+            "title": "Model Version",
+            "type": "string"
+          },
+          "nodes_total": {
+            "default": 0,
+            "title": "Nodes Total",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "estimated",
+              "inconclusive",
+              "insufficient_evidence",
+              "unavailable",
+              "pending"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "strength": {
+            "anyOf": [
+              {
+                "enum": [
+                  "low",
+                  "moderate",
+                  "strong"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A heuristic label, not a probability or a radius; those would need calibration",
+            "title": "Strength"
+          },
+          "summary": {
+            "title": "Summary",
+            "type": "string"
+          },
+          "target_ip": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Ip"
+          },
+          "warnings": {
+            "default": [],
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "status",
+          "summary",
+          "model_version"
+        ],
+        "title": "LocationEstimateOut",
         "type": "object"
       },
       "LoginRequest": {
@@ -774,6 +986,11 @@
             ],
             "title": "Latitude"
           },
+          "location_verified": {
+            "default": false,
+            "title": "Location Verified",
+            "type": "boolean"
+          },
           "longitude": {
             "anyOf": [
               {
@@ -840,6 +1057,34 @@
           "timeout_ms"
         ],
         "title": "PingOptionsOut",
+        "type": "object"
+      },
+      "PlaceOut": {
+        "properties": {
+          "country": {
+            "title": "Country",
+            "type": "string"
+          },
+          "latitude": {
+            "title": "Latitude",
+            "type": "number"
+          },
+          "longitude": {
+            "title": "Longitude",
+            "type": "number"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "country",
+          "latitude",
+          "longitude"
+        ],
+        "title": "PlaceOut",
         "type": "object"
       },
       "PublicNode": {
@@ -2652,6 +2897,49 @@
           }
         },
         "summary": "Stream Events",
+        "tags": [
+          "measurements"
+        ]
+      }
+    },
+    "/api/v1/measurements/{measurement_id}/location": {
+      "get": {
+        "description": "Where the target address appears to be, from the nodes' round-trip times (experimental).",
+        "operationId": "estimated_location_api_v1_measurements__measurement_id__location_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "measurement_id",
+            "required": true,
+            "schema": {
+              "title": "Measurement Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LocationEstimateOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Estimated Location",
         "tags": [
           "measurements"
         ]

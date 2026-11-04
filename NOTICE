@@ -1,0 +1,4 @@
+ipping-backend includes data from GeoNames (https://www.geonames.org), licensed under the Creative
+Commons Attribution 4.0 License (https://creativecommons.org/licenses/by/4.0/): the list of cities
+in src/ipping_backend/geolocation/cities.csv.gz, derived from the "cities15000" dump by
+scripts/build_gazetteer.py (cities of 100,000+ people, nearby suburbs merged).

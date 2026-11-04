@@ -266,6 +266,7 @@ class MeasurementEngine:
                         asn=node.asn,
                         latitude=node.latitude,
                         longitude=node.longitude,
+                        location_verified=node.location_verified,
                     ).model_dump(),
                     tested_ip=measurement.target_ip,
                 )

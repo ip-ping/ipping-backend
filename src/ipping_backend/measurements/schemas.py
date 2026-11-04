@@ -61,6 +61,7 @@ class NodeInfo(BaseModel):
     asn: int | None = None
     latitude: float | None = None
     longitude: float | None = None
+    location_verified: bool = False
 
 
 class Summary(BaseModel):

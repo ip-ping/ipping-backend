@@ -82,6 +82,34 @@ Limits that an operator may need to change while running (emergency stop, per-us
 probe budgets, target denylist, retention) live in the database and are edited through
 `PATCH /api/v1/admin/settings`.
 
+## Estimated network location (experimental)
+
+`GET /api/v1/measurements/{id}/location` says where the target address *appears* to be, from the
+smallest round-trip time each node measured and where those nodes are. Latency is not distance, so the
+method is built around what it can and cannot know:
+
+1. **Hard limits.** A node that measured `r` ms heard from the target within `150 * r` km (light
+   cannot go faster). Places outside any node's limit are impossible. If two nodes' limits cannot
+   overlap, the answer is *inconclusive*: "a single location could not be established; possible
+   explanations include anycast, routing differences, or unreliable observations". It never declares
+   anycast on its own.
+2. **Ranking.** The remaining cities (GeoNames, 3,399 cities of 100,000+ people, see `NOTICE`) are
+   scored by how well the times fit an internet path, with the path-length factor (1.2 to 3 times the
+   fibre distance) fitted per place. Nodes with unverified coordinates count for less.
+3. **Honest output.** The result lists its evidence, the other plausible regions, warnings, and a
+   heuristic strength (`low`, `moderate`, `strong`), never a percentage or an accuracy radius, which
+   would need calibration. "Insufficient evidence" (fewer than 3 nodes with known coordinates, or no
+   node closer than 100 ms) is a normal answer. It needs a measurement made with "same IP for every
+   node", so every node probed the same address.
+
+**How well does it work?** Only measured on synthetic paths so far (random targets, random fleets of
+4 to 32 nodes, path factors 1.2 to 2.8, jitter): across 399 trials every `strong` answer was within
+218 km and every `moderate` within 272 km; `low` answers had a median error of 352 km, 58% within 500 km
+and a worst case of 8,232 km. That says the arithmetic is sound and the labels mean something; it says
+nothing about real-world accuracy, which needs targets of known location (see the roadmap). Anycast
+addresses, CDN edges and VPN endpoints are located where they answer from, not where their operator or
+users are.
+
 ## Security model
 
 * Targets are reduced to a host; credentials, paths and query strings in a pasted URL are dropped.
@@ -122,7 +150,8 @@ Small steps, each one committed and logged in [CHANGELOG.md](CHANGELOG.md).
 - [ ] Per-session / per-IP quota tuning from real traffic
 - [ ] TCP, HTTP and traceroute probes
 - [ ] DNS comparison across nodes
-- [ ] Estimated network location (evidence-based, with explicit "insufficient evidence")
+- [x] Estimated network location: constraint-based, evidence listed, explicit "insufficient evidence" (checked on synthetic paths only)
+- [ ] Calibrate the location model against real targets of known location (and optionally GeoIP / ASN / geofeed evidence)
 
 ## License
 

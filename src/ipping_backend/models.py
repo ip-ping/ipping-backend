@@ -220,6 +220,19 @@ class MeasurementEvent(Base):
     __table_args__ = (UniqueConstraint("measurement_id", "seq", name="uq_events_measurement_seq"),)
 
 
+class LocationEstimate(Base):
+    """The stored estimate for a finished measurement (see geolocation/)."""
+
+    __tablename__ = "location_estimates"
+
+    measurement_id: Mapped[str] = mapped_column(
+        ForeignKey("measurements.id", ondelete="CASCADE"), primary_key=True
+    )
+    model_version: Mapped[str] = mapped_column(String(40))
+    result: Mapped[dict[str, Any]] = mapped_column(JSON)
+    computed_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
 class AuditEvent(Base):
     __tablename__ = "audit_events"
 

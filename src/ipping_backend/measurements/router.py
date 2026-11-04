@@ -18,6 +18,8 @@ from ..deps import (
     csrf_protect,
 )
 from ..errors import ApiError
+from ..geolocation.schemas import LocationEstimateOut
+from ..geolocation.service import location_for
 from ..models import Measurement, MeasurementEvent, User, WebSession
 from . import schemas
 from .engine import Owner
@@ -97,6 +99,15 @@ async def get_measurement(
     result = await engine.load(db, measurement_id)
     assert result is not None  # noqa: S101
     return result
+
+
+@router.get("/{measurement_id}/location", response_model=LocationEstimateOut)
+async def estimated_location(
+    measurement_id: str, session: OptionalSession, db: Db
+) -> LocationEstimateOut:
+    """Where the target address appears to be, from the nodes' round-trip times (experimental)."""
+    measurement = await _authorized(db, measurement_id, session)
+    return await location_for(db, measurement)
 
 
 @router.post("/{measurement_id}/cancel", status_code=202)
