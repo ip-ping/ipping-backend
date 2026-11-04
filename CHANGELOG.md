@@ -4,6 +4,9 @@ Progress log for `ipping-backend`, newest first. Each entry is one small, tested
 
 ## Unreleased
 
+### 2026-11-04: signed releases
+- Release files get signed build-provenance attestations (`gh attestation verify`); takes effect with the next release.
+
 ## v0.1.0 (2026-11-04)
 
 First release. Everything below shipped in it.
