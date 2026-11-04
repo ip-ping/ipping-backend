@@ -4,6 +4,14 @@ Progress log for `ipping-backend`, newest first. Each entry is one small, tested
 
 ## Unreleased
 
+### 2026-11-04: measurement engine and API
+- Tasks are stored before dispatch; statuses only move forward; disconnects, deadlines, cancellation
+  and backend restarts all end in an explicit state.
+- REST API, live SSE with `Last-Event-ID` resume, node enrollment and WebSocket, first-run setup,
+  admin sign-in with CSRF protection, runtime settings and an emergency stop.
+- `contracts/openapi.json` and `node-protocol-v1.schema.json` generated, with a drift test.
+- 104 tests; `ruff` and strict `mypy` clean.
+
 ### 2026-11-04: data layer
 - SQLAlchemy 2 schema (nodes, measurements, per-node tasks, samples, ordered events, audit log).
 - Alembic migration shipped inside the package; startup refuses a database that is not at head.

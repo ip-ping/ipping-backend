@@ -1,0 +1,544 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "backend_to_node": {
+    "$defs": {
+      "CancelFrame": {
+        "properties": {
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          },
+          "type": {
+            "const": "cancel",
+            "default": "cancel",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id"
+        ],
+        "title": "CancelFrame",
+        "type": "object"
+      },
+      "ErrorFrame": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "const": "error",
+            "default": "error",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "ErrorFrame",
+        "type": "object"
+      },
+      "Limits": {
+        "properties": {
+          "max_concurrent_tasks": {
+            "default": 8,
+            "title": "Max Concurrent Tasks",
+            "type": "integer"
+          },
+          "max_count": {
+            "default": 10,
+            "title": "Max Count",
+            "type": "integer"
+          }
+        },
+        "title": "Limits",
+        "type": "object"
+      },
+      "PingOptions": {
+        "properties": {
+          "count": {
+            "maximum": 10,
+            "minimum": 1,
+            "title": "Count",
+            "type": "integer"
+          },
+          "interval_ms": {
+            "maximum": 5000,
+            "minimum": 200,
+            "title": "Interval Ms",
+            "type": "integer"
+          },
+          "timeout_ms": {
+            "maximum": 10000,
+            "minimum": 200,
+            "title": "Timeout Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "count",
+          "interval_ms",
+          "timeout_ms"
+        ],
+        "title": "PingOptions",
+        "type": "object"
+      },
+      "Pong": {
+        "properties": {
+          "type": {
+            "const": "pong",
+            "default": "pong",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "title": "Pong",
+        "type": "object"
+      },
+      "TaskFrame": {
+        "properties": {
+          "attempt_id": {
+            "title": "Attempt Id",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "kind": {
+            "const": "ping",
+            "default": "ping",
+            "title": "Kind",
+            "type": "string"
+          },
+          "options": {
+            "$ref": "#/$defs/PingOptions"
+          },
+          "target": {
+            "$ref": "#/$defs/TaskTarget"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          },
+          "type": {
+            "const": "task",
+            "default": "task",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "attempt_id",
+          "target",
+          "options",
+          "expires_at"
+        ],
+        "title": "TaskFrame",
+        "type": "object"
+      },
+      "TaskTarget": {
+        "description": "Exactly one of `ip` (probe this address) or `hostname` (resolve it on the node).",
+        "properties": {
+          "family": {
+            "default": "auto",
+            "enum": [
+              "auto",
+              "4",
+              "6"
+            ],
+            "title": "Family",
+            "type": "string"
+          },
+          "hostname": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Hostname"
+          },
+          "ip": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Ip"
+          }
+        },
+        "title": "TaskTarget",
+        "type": "object"
+      },
+      "Welcome": {
+        "properties": {
+          "heartbeat_interval_s": {
+            "default": 15,
+            "title": "Heartbeat Interval S",
+            "type": "integer"
+          },
+          "limits": {
+            "$ref": "#/$defs/Limits"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "node_status": {
+            "enum": [
+              "pending",
+              "approved"
+            ],
+            "title": "Node Status",
+            "type": "string"
+          },
+          "protocol_version": {
+            "title": "Protocol Version",
+            "type": "integer"
+          },
+          "server_time": {
+            "format": "date-time",
+            "title": "Server Time",
+            "type": "string"
+          },
+          "type": {
+            "const": "welcome",
+            "default": "welcome",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocol_version",
+          "node_id",
+          "node_status",
+          "server_time"
+        ],
+        "title": "Welcome",
+        "type": "object"
+      }
+    },
+    "discriminator": {
+      "mapping": {
+        "cancel": "#/$defs/CancelFrame",
+        "error": "#/$defs/ErrorFrame",
+        "pong": "#/$defs/Pong",
+        "task": "#/$defs/TaskFrame",
+        "welcome": "#/$defs/Welcome"
+      },
+      "propertyName": "type"
+    },
+    "oneOf": [
+      {
+        "$ref": "#/$defs/Welcome"
+      },
+      {
+        "$ref": "#/$defs/TaskFrame"
+      },
+      {
+        "$ref": "#/$defs/CancelFrame"
+      },
+      {
+        "$ref": "#/$defs/Pong"
+      },
+      {
+        "$ref": "#/$defs/ErrorFrame"
+      }
+    ]
+  },
+  "backend_version": "0.1.0",
+  "description": "JSON text frames exchanged over the node WebSocket.",
+  "node_to_backend": {
+    "$defs": {
+      "Capabilities": {
+        "properties": {
+          "ipv4": {
+            "default": true,
+            "title": "Ipv4",
+            "type": "boolean"
+          },
+          "ipv6": {
+            "default": false,
+            "title": "Ipv6",
+            "type": "boolean"
+          },
+          "kinds": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Kinds",
+            "type": "array"
+          }
+        },
+        "title": "Capabilities",
+        "type": "object"
+      },
+      "Hello": {
+        "properties": {
+          "capabilities": {
+            "$ref": "#/$defs/Capabilities"
+          },
+          "node_version": {
+            "maxLength": 32,
+            "title": "Node Version",
+            "type": "string"
+          },
+          "protocol_versions": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 16,
+            "minItems": 1,
+            "title": "Protocol Versions",
+            "type": "array"
+          },
+          "type": {
+            "const": "hello",
+            "default": "hello",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "protocol_versions",
+          "node_version",
+          "capabilities"
+        ],
+        "title": "Hello",
+        "type": "object"
+      },
+      "Ping": {
+        "properties": {
+          "type": {
+            "const": "ping",
+            "default": "ping",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "title": "Ping",
+        "type": "object"
+      },
+      "SampleFrame": {
+        "description": "One echo request: its round-trip time, or why there is none.",
+        "properties": {
+          "attempt_id": {
+            "title": "Attempt Id",
+            "type": "string"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "maxLength": 40,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Error Code"
+          },
+          "rtt_us": {
+            "anyOf": [
+              {
+                "maximum": 60000000,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Rtt Us"
+          },
+          "seq": {
+            "exclusiveMaximum": 1000,
+            "minimum": 0,
+            "title": "Seq",
+            "type": "integer"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "timeout",
+              "error"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          },
+          "type": {
+            "const": "sample",
+            "default": "sample",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "attempt_id",
+          "seq",
+          "status"
+        ],
+        "title": "SampleFrame",
+        "type": "object"
+      },
+      "TaskAck": {
+        "description": "The node accepted the task and is starting it.",
+        "properties": {
+          "attempt_id": {
+            "title": "Attempt Id",
+            "type": "string"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          },
+          "type": {
+            "const": "task_ack",
+            "default": "task_ack",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "attempt_id"
+        ],
+        "title": "TaskAck",
+        "type": "object"
+      },
+      "TaskResult": {
+        "properties": {
+          "attempt_id": {
+            "title": "Attempt Id",
+            "type": "string"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "maxLength": 40,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Error Code"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "maxLength": 300,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Error Message"
+          },
+          "resolved_ips": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 32,
+            "title": "Resolved Ips",
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "completed",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "task_id": {
+            "title": "Task Id",
+            "type": "string"
+          },
+          "tested_ip": {
+            "anyOf": [
+              {
+                "maxLength": 45,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Tested Ip"
+          },
+          "type": {
+            "const": "task_result",
+            "default": "task_result",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "task_id",
+          "attempt_id",
+          "status"
+        ],
+        "title": "TaskResult",
+        "type": "object"
+      }
+    },
+    "discriminator": {
+      "mapping": {
+        "hello": "#/$defs/Hello",
+        "ping": "#/$defs/Ping",
+        "sample": "#/$defs/SampleFrame",
+        "task_ack": "#/$defs/TaskAck",
+        "task_result": "#/$defs/TaskResult"
+      },
+      "propertyName": "type"
+    },
+    "oneOf": [
+      {
+        "$ref": "#/$defs/Hello"
+      },
+      {
+        "$ref": "#/$defs/TaskAck"
+      },
+      {
+        "$ref": "#/$defs/SampleFrame"
+      },
+      {
+        "$ref": "#/$defs/TaskResult"
+      },
+      {
+        "$ref": "#/$defs/Ping"
+      }
+    ]
+  },
+  "protocol_version": 1,
+  "title": "ipping node protocol"
+}
