@@ -4,6 +4,11 @@ Progress log for `ipping-backend`, newest first. Each entry is one small, tested
 
 ## Unreleased
 
+### 2026-11-04: release assets for installers
+- Releases now also publish `requirements.lock`: the runtime dependencies with hashes, which the
+  central installer's direct mode installs with `--require-hashes` before adding the wheel.
+- Release workflow cleaned up (prerelease flag no longer relies on word splitting); actionlint clean.
+
 ### 2026-11-04: container image and CI
 - Multi-stage `Dockerfile` (uv, non-root user, health check); `migrate` and `serve` are separate runs.
 - GitHub Actions: `ci.yml` (lint, format, strict types, tests on SQLite and PostgreSQL 16, contract

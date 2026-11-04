@@ -65,13 +65,16 @@ jobs:
           persist-credentials: false
       - uses: astral-sh/setup-uv@68559e99cc807c1eb7e9238fd43a15bba460eec2 # v10.3.3
       - run: uv build --wheel
+      - name: Hash-locked runtime requirements, for direct installs
+        run: uv export --frozen --no-dev --no-emit-project --no-header --format requirements-txt -o dist/requirements.lock
       - name: Bundle contracts and checksums
         run: |
           tar -czf dist/ipping-backend-contracts-${{ github.ref_name }}.tar.gz contracts
-          cd dist && sha256sum * > SHA256SUMS
+          cd dist && sha256sum -- * > SHA256SUMS
       - name: Create the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${{ github.ref_name }}" dist/* --generate-notes \
-            $(case "${{ github.ref_name }}" in *-*) echo --prerelease;; esac)
+          args=(--generate-notes)
+          case "${GITHUB_REF_NAME}" in *-*) args+=(--prerelease) ;; esac
+          gh release create "${GITHUB_REF_NAME}" dist/* "${args[@]}"
