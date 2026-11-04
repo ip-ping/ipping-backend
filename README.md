@@ -90,7 +90,7 @@ Small steps, each one committed and logged in [CHANGELOG.md](CHANGELOG.md).
 
 - [ ] Node protocol v1 and contracts (`contracts/`)
 - [x] Target parsing and destination policy
-- [ ] Database schema and migrations
+- [x] Database schema and migrations
 - [ ] Measurement engine, REST API, SSE, node WebSocket, admin and setup
 - [ ] Dockerfile and CI (lint, types, tests, contract-drift check)
 - [ ] Versioned release artifacts (container image, wheel) and checksums
