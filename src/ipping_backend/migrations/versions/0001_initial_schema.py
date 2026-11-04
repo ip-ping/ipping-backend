@@ -93,7 +93,7 @@ def upgrade() -> None:
         sa.Column("latitude", sa.Float(), nullable=True),
         sa.Column("longitude", sa.Float(), nullable=True),
         sa.Column("provider", sa.String(length=100), nullable=True),
-        sa.Column("asn", sa.Integer(), nullable=True),
+        sa.Column("asn", sa.BigInteger(), nullable=True),
         sa.Column("location_verified", sa.Boolean(), nullable=False),
         sa.Column("capabilities", sa.JSON(), nullable=False),
         sa.Column("version", sa.String(length=32), nullable=True),

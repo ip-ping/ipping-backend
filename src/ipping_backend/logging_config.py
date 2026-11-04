@@ -33,3 +33,4 @@ def configure_logging(level: str = "INFO", as_json: bool = True) -> None:
     root = logging.getLogger()
     root.handlers[:] = [handler]
     root.setLevel(level.upper())
+    logging.getLogger("alembic").setLevel(logging.WARNING)  # plugin chatter on every startup

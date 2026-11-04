@@ -47,10 +47,25 @@ On the first start with no administrator, a one-time setup token is printed to t
 `IPPING_SETUP_TOKEN`). Open the frontend's `/setup` page and use it to create the admin account.
 
 ```bash
-uv run pytest            # 104 tests
+uv run pytest            # 104 tests (SQLite)
+IPPING_TEST_DATABASE_URL=postgresql://user:pass@localhost/test uv run pytest tests/test_api.py  # PostgreSQL
 uv run ruff check . && uv run mypy
 uv run python scripts/export_contracts.py   # regenerate contracts/ after changing the API
 ```
+
+### Container image
+
+Published to Docker Hub by GitHub Actions on every push to `main` (`latest` and the commit SHA,
+`linux/amd64` + `linux/arm64`) and with a version tag on releases. The image runs as a non-root
+user; migrating and serving are separate runs so the server never changes the schema on its own:
+
+```bash
+docker run --rm -e IPPING_DATABASE_URL=postgresql://user:pass@db/ipping <image> migrate
+docker run -d -p 8000:8000 -e IPPING_DATABASE_URL=postgresql://user:pass@db/ipping <image>
+```
+
+In normal use you do not run this by hand: the `ipping` repository's installer and compose file
+bring up the backend together with the frontend, database and reverse proxy.
 
 ### Configuration
 
@@ -92,9 +107,9 @@ Small steps, each one committed and logged in [CHANGELOG.md](CHANGELOG.md).
 - [x] Target parsing and destination policy
 - [x] Database schema and migrations
 - [x] Measurement engine, REST API, SSE, node WebSocket, admin and setup
-- [ ] Dockerfile and CI (lint, types, tests, contract-drift check)
-- [ ] Versioned release artifacts (container image, wheel) and checksums
-- [ ] Postgres integration test in CI
+- [x] Dockerfile, CI (lint, types, tests, contract-drift check) and Docker Hub publishing
+- [x] API tests also run on PostgreSQL
+- [ ] First tagged release (versioned image, wheel, contracts, checksums)
 - [ ] Per-session / per-IP quota tuning from real traffic
 - [ ] TCP, HTTP and traceroute probes
 - [ ] DNS comparison across nodes

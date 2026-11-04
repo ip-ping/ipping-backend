@@ -13,6 +13,7 @@ from typing import Any
 
 from sqlalchemy import (
     JSON,
+    BigInteger,
     Boolean,
     DateTime,
     Float,
@@ -124,7 +125,7 @@ class Node(Base):
     latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     provider: Mapped[str | None] = mapped_column(String(100), nullable=True)
-    asn: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    asn: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     # Set by an administrator after checking the node's declared location.
     location_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     capabilities: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)

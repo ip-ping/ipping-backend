@@ -4,6 +4,16 @@ Progress log for `ipping-backend`, newest first. Each entry is one small, tested
 
 ## Unreleased
 
+### 2026-11-04: container image and CI
+- Multi-stage `Dockerfile` (uv, non-root user, health check); `migrate` and `serve` are separate runs.
+- GitHub Actions: `ci.yml` (lint, format, strict types, tests on SQLite and PostgreSQL 16, contract
+  drift, image build) for PRs and branches; `docker.yml` publishes `latest` + commit SHA for
+  `linux/amd64,linux/arm64` on pushes to `main`, the same way `file-node` does; `release.yml`
+  builds a versioned image and a GitHub release when a `v*` tag is pushed. Actions are pinned to
+  commit SHAs.
+- Fixed found by running on PostgreSQL: ASNs are 32-bit, so `nodes.asn` is now a `BIGINT`.
+- Test mode for PostgreSQL via `IPPING_TEST_DATABASE_URL`.
+
 ### 2026-11-04: measurement engine and API
 - Tasks are stored before dispatch; statuses only move forward; disconnects, deadlines, cancellation
   and backend restarts all end in an explicit state.

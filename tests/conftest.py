@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import os
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -19,13 +21,30 @@ PASSWORD = "correct horse battery"
 
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
-    return Settings(
-        database_url=f"sqlite+aiosqlite:///{tmp_path / 'test.db'}",
+    """SQLite by default; set IPPING_TEST_DATABASE_URL to run the same tests on PostgreSQL."""
+    url = (
+        os.environ.get("IPPING_TEST_DATABASE_URL") or f"sqlite+aiosqlite:///{tmp_path / 'test.db'}"
+    )
+    settings = Settings(
+        database_url=url,
         setup_token=SETUP_TOKEN,
         cookie_secure=False,
         log_json=False,
         log_level="WARNING",
     )
+    if "IPPING_TEST_DATABASE_URL" in os.environ:
+        asyncio.run(_reset_database(settings.database_url))
+    return settings
+
+
+async def _reset_database(url: str) -> None:
+    from ipping_backend.db import make_engine
+    from ipping_backend.models import Base
+
+    engine = make_engine(url)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.drop_all)
+    await engine.dispose()
 
 
 class Api:
