@@ -4,6 +4,8 @@ Progress log for `ipping-backend`, newest first. Each entry is one small, tested
 
 ## Unreleased
 
+## v0.2.0 (2026-11-05)
+
 ### 2026-11-04: estimated network location
 - `GET /api/v1/measurements/{id}/location`: where the target appears to be, from the nodes' smallest
   round-trip times and positions. Speed-of-light limits exclude impossible places; remaining cities are
