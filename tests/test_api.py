@@ -395,13 +395,28 @@ def test_node_disconnect_ends_its_tasks_without_counting_loss(api: Api) -> None:
 
 
 def test_deadline_times_out_silent_nodes(app: Any, api: Api) -> None:
+    from datetime import timedelta
+
+    from sqlalchemy import update
+
+    from ipping_backend.models import Measurement, utcnow
+
     api.become_admin()
     _, credential = api.enroll_node()
     ws, session = connect(api, credential)
     try:
         measurement = api.post("/api/v1/measurements", {"target": "example.com"}).json()
         json.loads(session.receive_text())  # the node got the task and says nothing
-        api.client.portal.call(app.state.engine._watch_deadline, measurement["id"], 0)
+
+        async def let_the_deadline_pass() -> None:
+            async with app.state.sessionmaker() as db:
+                await db.execute(
+                    update(Measurement).values(deadline_at=utcnow() - timedelta(seconds=1))
+                )
+                await db.commit()
+            await app.state.engine.reap()
+
+        api.client.portal.call(let_the_deadline_pass)
         final = api.get(f"/api/v1/measurements/{measurement['id']}").json()
         assert final["status"] == "completed"
         assert final["tasks"][0]["status"] == "timed_out"
@@ -621,3 +636,29 @@ def test_retention_removes_old_samples_but_keeps_summaries(app: Any, api: Api) -
     assert removed["samples"] == 4 and remaining == 0
     final = api.get(f"/api/v1/measurements/{mid}").json()
     assert final["tasks"][0]["summary"]["received"] == 4 and final["tasks"][0]["samples"] == []
+
+
+def test_maintenance_forgets_instances_that_stopped_long_ago(app: Any, api: Api) -> None:
+    from datetime import timedelta
+
+    from sqlalchemy import select
+
+    from ipping_backend import maintenance
+    from ipping_backend.models import BackendInstance, utcnow
+
+    async def run() -> list[str]:
+        sm = app.state.sessionmaker
+        async with sm() as db:
+            db.add(
+                BackendInstance(
+                    id="dead" + "0" * 28, version="0", heartbeat_at=utcnow() - timedelta(days=2)
+                )
+            )
+            await db.commit()
+        await maintenance.run_once(sm)
+        async with sm() as db:
+            return list((await db.execute(select(BackendInstance.id))).scalars())
+
+    remaining = api.client.portal.call(run)
+    assert app.state.cluster.instance_id in remaining  # the running one is never touched
+    assert not any(i.startswith("dead") for i in remaining)

@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
+from ..cluster import OnlineNode
 from ..deps import AdminUser, Db, Engine, client_ip, csrf_protect
 from ..errors import ApiError
 from ..measurements.schemas import TASK_ACTIVE
@@ -185,8 +186,12 @@ class RotatedCredential(BaseModel):
     credential: str = Field(description="Shown once. The node must be reconfigured with it.")
 
 
-def _admin_node(node: Node, request: Request) -> AdminNode:
-    connection = request.app.state.registry.get(node.id)
+async def _online(request: Request, db: Db) -> dict[str, OnlineNode]:
+    return await request.app.state.cluster.online_nodes(db)  # type: ignore[no-any-return]
+
+
+def _admin_node(node: Node, online: dict[str, OnlineNode]) -> AdminNode:
+    connection = online.get(node.id)
     caps = connection.capabilities if connection else None
     return AdminNode(
         id=node.id,
@@ -221,7 +226,8 @@ async def _get_node(db: Db, node_id: str) -> Node:
 @router.get("/nodes", response_model=list[AdminNode])
 async def admin_list_nodes(request: Request, admin: AdminUser, db: Db) -> list[AdminNode]:
     nodes = (await db.execute(select(Node).order_by(Node.created_at))).scalars()
-    return [_admin_node(n, request) for n in nodes]
+    online = await _online(request, db)
+    return [_admin_node(n, online) for n in nodes]
 
 
 @router.patch("/nodes/{node_id}", response_model=AdminNode)
@@ -236,7 +242,7 @@ async def update_node(
         setattr(node, key, value)
     await _audit(db, admin, request, "node.updated", node_id, fields=sorted(changes))
     await db.commit()
-    return _admin_node(node, request)
+    return _admin_node(node, await _online(request, db))
 
 
 @router.post("/nodes/{node_id}/approve", response_model=AdminNode)
@@ -248,7 +254,7 @@ async def approve_node(node_id: str, request: Request, admin: AdminUser, db: Db)
     node.approved_at = utcnow()
     await _audit(db, admin, request, "node.approved", node_id)
     await db.commit()
-    return _admin_node(node, request)
+    return _admin_node(node, await _online(request, db))
 
 
 @router.post("/nodes/{node_id}/revoke", response_model=AdminNode)
@@ -259,10 +265,11 @@ async def revoke_node(
     node.status = "revoked"
     await _audit(db, admin, request, "node.revoked", node_id)
     await db.commit()
-    connection = request.app.state.registry.get(node_id)
-    if connection is not None:
-        await connection.close(4403, "revoked")
-    return _admin_node(node, request)
+    # The node's socket may be held by any backend instance; tell them all.
+    await request.app.state.cluster.command(
+        {"type": "close", "node_id": node_id, "code": 4403, "reason": "revoked"}
+    )
+    return _admin_node(node, await _online(request, db))
 
 
 @router.post("/nodes/{node_id}/rotate-credential", response_model=RotatedCredential)
@@ -276,9 +283,9 @@ async def rotate_credential(
     node.credential_hash = hash_secret(secret)
     await _audit(db, admin, request, "node.credential_rotated", node_id)
     await db.commit()
-    connection = request.app.state.registry.get(node_id)
-    if connection is not None:
-        await connection.close(4403, "credential rotated")
+    await request.app.state.cluster.command(
+        {"type": "close", "node_id": node_id, "code": 4403, "reason": "credential rotated"}
+    )
     return RotatedCredential(node_id=node_id, credential=f"{node_id}.{secret}")
 
 
@@ -326,12 +333,12 @@ async def service_status(request: Request, admin: AdminUser, db: Db) -> ServiceS
         .where(MeasurementTask.status.in_(TASK_ACTIVE))
     )
     return ServiceStatus(
-        nodes_online=len(request.app.state.registry),
+        nodes_online=len(await _online(request, db)),
         nodes_approved=by_status.get("approved", 0),
         nodes_pending=by_status.get("pending", 0),
         measurements_running=running or 0,
         tasks_active=active or 0,
-        live_streams=request.app.state.bus.subscriber_count(),
+        live_streams=request.app.state.cluster.hub.count("events:"),
     )
 
 

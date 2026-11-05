@@ -1,42 +1,39 @@
+"""Rate limits that every backend process agrees on.
+
+The counts live in the database (`rate_events`), not in a process's memory: with several
+processes behind one proxy an in-memory limiter would let through that many times the limit. A hit
+is recorded the moment it is allowed, in its own committed transaction, so a request that fails
+validation afterwards still counts (otherwise bad requests would be a free way around the limit).
+Under heavy concurrency the limit can be exceeded by a request or two; it is an abuse brake, not an
+accounting system.
+"""
+
 from __future__ import annotations
 
-import time
-from collections import defaultdict, deque
+from datetime import timedelta
+
+from sqlalchemy import delete, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ..models import RateEvent, utcnow
 
 
-class SlidingWindowLimiter:
-    """In-memory limiter. Fine while there is a single backend process (see the README)."""
-
-    def __init__(self, limit: int, window_s: float) -> None:
-        self.limit = limit
-        self.window_s = window_s
-        self._hits: dict[str, deque[float]] = defaultdict(deque)
-
-    def allow(self, key: str, now: float | None = None) -> bool:
-        now = time.monotonic() if now is None else now
-        hits = self._hits[key]
-        while hits and now - hits[0] > self.window_s:
-            hits.popleft()
-        if len(hits) >= self.limit:
-            return False
-        hits.append(now)
-        return True
-
-    def prune(self, now: float | None = None) -> None:
-        now = time.monotonic() if now is None else now
-        for key in [
-            k for k, hits in self._hits.items() if not hits or now - hits[-1] > self.window_s
-        ]:
-            del self._hits[key]
+async def allow(db: AsyncSession, key: str, limit: int, window_s: float) -> bool:
+    cutoff = utcnow() - timedelta(seconds=window_s)
+    used = await db.scalar(
+        select(func.count())
+        .select_from(RateEvent)
+        .where(RateEvent.key == key, RateEvent.at > cutoff)
+    )
+    if (used or 0) >= limit:
+        return False
+    db.add(RateEvent(key=key))
+    await db.commit()
+    return True
 
 
-class Limiters:
-    """The per-application limiters for unauthenticated, abuse-prone endpoints."""
-
-    def __init__(self) -> None:
-        import asyncio
-
-        self.login = SlidingWindowLimiter(limit=10, window_s=60)
-        self.setup = SlidingWindowLimiter(limit=5, window_s=60)
-        self.enroll = SlidingWindowLimiter(limit=10, window_s=60)
-        self.setup_lock = asyncio.Lock()
+async def prune(db: AsyncSession, older_than_s: float = 3600) -> int:
+    result = await db.execute(
+        delete(RateEvent).where(RateEvent.at < utcnow() - timedelta(seconds=older_than_s))
+    )
+    return result.rowcount  # type: ignore[attr-defined,no-any-return]

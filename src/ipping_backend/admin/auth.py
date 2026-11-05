@@ -4,16 +4,21 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
 
 from ..deps import CurrentSession, Db, OptionalSession, client_ip, csrf_protect, require_admin
 from ..errors import ApiError
-from ..models import AuditEvent, User
+from ..models import AppSetting, AuditEvent, User
 from ..security.passwords import hash_password, verify_password
+from ..security.ratelimit import allow
 from ..security.sessions import create_session, destroy_session
 from ..security.tokens import secrets_match
 
 router = APIRouter(prefix="/api/v1", tags=["session"])
+
+SETUP_DONE_KEY = "setup_completed"
+SETUP_TOKEN_KEY = "setup_token_pending"  # noqa: S105 - a settings key, not a secret
 
 
 class SessionOut(BaseModel):
@@ -67,22 +72,29 @@ async def run_setup(
 ) -> SessionOut:
     """One-time creation of the first administrator, gated by the setup token."""
     ip = client_ip(request) or "unknown"
-    if not request.app.state.limiters.setup.allow(ip):
+    if not await allow(db, f"setup:{ip}", 5, 60):
         raise ApiError(429, "rate_limited", "Too many attempts. Wait a minute.")
     expected = request.app.state.setup_token
-    async with request.app.state.limiters.setup_lock:
-        if (await db.scalar(select(func.count()).select_from(User))) != 0:
-            raise ApiError(409, "already_set_up", "An administrator already exists.")
-        if not expected or not secrets_match(body.setup_token, expected):
-            raise ApiError(403, "invalid_setup_token", "The setup token is not correct.")
-        user = User(username=body.username, password_hash=hash_password(body.password))
-        db.add(user)
-        db.add(AuditEvent(actor=body.username, action="admin.setup", source_ip=ip))
+    if (await db.scalar(select(func.count()).select_from(User))) != 0:
+        raise ApiError(409, "already_set_up", "An administrator already exists.")
+    if not expected or not secrets_match(body.setup_token, expected):
+        raise ApiError(403, "invalid_setup_token", "The setup token is not correct.")
+    user = User(username=body.username, password_hash=hash_password(body.password))
+    db.add(user)
+    db.add(AuditEvent(actor=body.username, action="admin.setup", source_ip=ip))
+    # Two requests may race past the check above, in this process or in another one. Only one can
+    # insert this row (it is a primary key), so only one administrator is ever created this way.
+    db.add(AppSetting(key=SETUP_DONE_KEY, value=True))
+    try:
         await db.flush()
-        if session is not None:
-            await destroy_session(db, session)
-        new_session = await create_session(db, response, request.app.state.settings, user.id)
-        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise ApiError(409, "already_set_up", "An administrator already exists.") from None
+    if session is not None:
+        await destroy_session(db, session)
+    new_session = await create_session(db, response, request.app.state.settings, user.id)
+    await db.execute(delete(AppSetting).where(AppSetting.key == SETUP_TOKEN_KEY))
+    await db.commit()
     request.app.state.setup_token = None
     return SessionOut(csrf_token=new_session.csrf_token, authenticated=True, username=user.username)
 
@@ -92,7 +104,7 @@ async def login(
     body: LoginRequest, request: Request, response: Response, session: OptionalSession, db: Db
 ) -> SessionOut:
     ip = client_ip(request) or "unknown"
-    if not request.app.state.limiters.login.allow(ip):
+    if not await allow(db, f"login:{ip}", 10, 60):
         raise ApiError(429, "rate_limited", "Too many sign-in attempts. Wait a minute.")
     user = (
         await db.execute(select(User).where(User.username == body.username))

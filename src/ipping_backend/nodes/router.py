@@ -14,6 +14,7 @@ from sqlalchemy import select, update
 from ..deps import Db, client_ip
 from ..errors import ApiError
 from ..models import AuditEvent, EnrollmentToken, Node, new_id, utcnow
+from ..security.ratelimit import allow
 from ..security.tokens import hash_secret, new_secret, secrets_match
 from . import protocol as proto
 from .registry import NodeConnection
@@ -66,7 +67,7 @@ class PublicNode(BaseModel):
 async def enroll(body: EnrollRequest, request: Request, db: Db) -> EnrollResponse:
     """Exchange a single-use enrollment token for this node's own credential."""
     ip = client_ip(request) or "unknown"
-    if not request.app.state.limiters.enroll.allow(ip):
+    if not await allow(db, f"enroll:{ip}", 10, 60):
         raise ApiError(429, "rate_limited", "Too many enrollment attempts. Wait a minute.")
 
     token = (
@@ -122,7 +123,7 @@ async def enroll(body: EnrollRequest, request: Request, db: Db) -> EnrollRespons
 @router.get("", response_model=list[PublicNode])
 async def list_nodes(request: Request, db: Db) -> list[PublicNode]:
     """Approved nodes only, with nothing that identifies the host behind them."""
-    registry = request.app.state.registry
+    online = await request.app.state.cluster.online_nodes(db)
     nodes = (
         await db.execute(
             select(Node)
@@ -132,7 +133,7 @@ async def list_nodes(request: Request, db: Db) -> list[PublicNode]:
     ).scalars()
     result = []
     for node in nodes:
-        connection = registry.get(node.id)
+        connection = online.get(node.id)
         caps = (
             connection.capabilities
             if connection
@@ -215,7 +216,7 @@ async def connect(websocket: WebSocket) -> None:
         protocol_version=max(versions),
         capabilities=hello.capabilities,
     )
-    registry, engine = state.registry, state.engine
+    registry, engine, cluster = state.registry, state.engine, state.cluster
 
     previous = registry.get(node.id)
     if previous is not None:  # a reconnect that overtook the old socket's cleanup
@@ -223,6 +224,7 @@ async def connect(websocket: WebSocket) -> None:
         await previous.close(4409, "replaced by a newer connection")
         await engine.on_node_disconnected(node.id)
     registry.register(connection)
+    await cluster.node_connected(node.id, hello.capabilities, connection.protocol_version)
 
     async with state.sessionmaker() as db:
         row = await db.get(Node, node.id)

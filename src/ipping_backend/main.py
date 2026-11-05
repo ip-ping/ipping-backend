@@ -5,27 +5,57 @@ import logging
 import secrets
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from typing import Any
 
 from fastapi import FastAPI
 from sqlalchemy import func, select, text
+from sqlalchemy.exc import IntegrityError
 
 from . import __version__, maintenance
 from .admin import auth as admin_auth
 from .admin import router as admin_router
+from .admin.auth import SETUP_TOKEN_KEY
+from .cluster import Cluster
 from .config import Settings, get_settings
 from .db import make_engine, make_sessionmaker
 from .errors import install_error_handlers
 from .logging_config import configure_logging
 from .measurements import router as measurements_router
 from .measurements.engine import MeasurementEngine
-from .measurements.events import EventBus
-from .models import Base, User
+from .models import AppSetting, Base, User
 from .nodes import router as nodes_router
 from .nodes.registry import NodeRegistry
-from .security.ratelimit import Limiters
 from .security.targets import Resolver, system_resolver
 
 log = logging.getLogger(__name__)
+
+
+async def _setup_token(sessionmaker: Any, settings: Settings) -> str | None:
+    """The one-time token for creating the first administrator, shared by every process.
+
+    From `IPPING_SETUP_TOKEN` when set. Otherwise one is generated and stored, so that all backend
+    processes accept the same token; the process that creates it is the one that logs it.
+    """
+    async with sessionmaker() as db:
+        if (await db.scalar(select(func.count()).select_from(User))) != 0:
+            return None
+        if settings.setup_token:
+            return settings.setup_token
+        stored = await db.get(AppSetting, SETUP_TOKEN_KEY)
+        if stored is not None:
+            return str(stored.value)
+        token = secrets.token_urlsafe(24)
+        db.add(AppSetting(key=SETUP_TOKEN_KEY, value=token))
+        try:
+            await db.commit()
+        except IntegrityError:  # another process generated one first: use theirs
+            await db.rollback()
+            stored = await db.get(AppSetting, SETUP_TOKEN_KEY)
+            return str(stored.value) if stored is not None else token
+    log.warning(
+        "No administrator exists yet. Open /setup and enter this one-time setup token: %s", token
+    )
+    return token
 
 
 def create_app(
@@ -47,14 +77,28 @@ def create_app(
         db_engine = make_engine(settings.database_url)
         sessionmaker = make_sessionmaker(db_engine)
         registry = NodeRegistry()
-        bus = EventBus()
+        cluster = Cluster(
+            sessionmaker,
+            db_engine,
+            settings.database_url,
+            heartbeat_s=settings.instance_heartbeat_s,
+            dead_after_s=settings.instance_dead_after_s,
+        )
+        engine = MeasurementEngine(
+            sessionmaker,
+            registry,
+            cluster,
+            resolver,
+            dispatch_poll_s=settings.dispatch_poll_s,
+            reaper_interval_s=settings.reaper_interval_s,
+        )
+        cluster.on_command(engine.handle_command)
         app.state.settings = settings
         app.state.db_engine = db_engine
         app.state.sessionmaker = sessionmaker
         app.state.registry = registry
-        app.state.bus = bus
-        app.state.limiters = Limiters()
-        app.state.engine = MeasurementEngine(sessionmaker, registry, bus, resolver)
+        app.state.cluster = cluster
+        app.state.engine = engine
 
         if create_schema:
             async with db_engine.begin() as conn:
@@ -64,24 +108,24 @@ def create_app(
 
             await ensure_schema_is_current(db_engine)
 
-        async with sessionmaker() as db:
-            has_admin = (await db.scalar(select(func.count()).select_from(User))) != 0
-        app.state.setup_token = None
-        if not has_admin:
-            app.state.setup_token = settings.setup_token or secrets.token_urlsafe(24)
-            if not settings.setup_token:
-                log.warning(
-                    "No administrator exists yet. Open /setup and enter this one-time setup token: %s",
-                    app.state.setup_token,
-                )
+        app.state.setup_token = await _setup_token(sessionmaker, settings)
 
-        await app.state.engine.recover_on_startup()
-        sweeper = asyncio.create_task(maintenance.loop(sessionmaker))
+        # Registering first matters: the reaper judges other instances by who is registered.
+        await cluster.start()
+        await engine.reap()  # settle anything an earlier process left behind, before serving
+        loops = [
+            asyncio.create_task(engine.run_dispatcher(), name="dispatcher"),
+            asyncio.create_task(engine.run_reaper(), name="reaper"),
+        ]
+        loops.append(asyncio.create_task(maintenance.loop(sessionmaker), name="maintenance"))
         try:
             yield
         finally:
-            sweeper.cancel()
-            await app.state.engine.shutdown()
+            for loop in loops:
+                loop.cancel()
+            await asyncio.gather(*loops, return_exceptions=True)
+            await engine.shutdown()
+            await cluster.stop()
             await db_engine.dispose()
 
     app = FastAPI(

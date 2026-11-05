@@ -6,10 +6,11 @@ import asyncio
 import logging
 from datetime import timedelta
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from .models import (
+    BackendInstance,
     EnrollmentToken,
     Measurement,
     MeasurementEvent,
@@ -19,6 +20,7 @@ from .models import (
     utcnow,
 )
 from .runtime_settings import load_settings
+from .security.ratelimit import prune as prune_rate_events
 
 log = logging.getLogger(__name__)
 
@@ -31,6 +33,12 @@ async def run_once(sessionmaker: async_sessionmaker[AsyncSession]) -> dict[str, 
     now = utcnow()
     removed: dict[str, int] = {}
     async with sessionmaker() as db:
+        if db.bind.dialect.name == "postgresql":
+            # Several processes run this loop; whoever holds the lock does this sweep (the lock
+            # goes away with the transaction), the others skip it.
+            got = await db.scalar(text("SELECT pg_try_advisory_xact_lock(7101)"))
+            if not got:
+                return removed
         settings = await load_settings(db)
         sample_cutoff = now - timedelta(days=settings.sample_retention_days)
         old = select(Measurement.id).where(
@@ -56,6 +64,15 @@ async def run_once(sessionmaker: async_sessionmaker[AsyncSession]) -> dict[str, 
         ).rowcount  # type: ignore[attr-defined]
         removed["sessions"] = (
             await db.execute(delete(WebSession).where(WebSession.expires_at < now))
+        ).rowcount  # type: ignore[attr-defined]
+        removed["rate_events"] = await prune_rate_events(db)
+        # Instances that stopped long ago (a crashed process leaves its row behind).
+        removed["instances"] = (
+            await db.execute(
+                delete(BackendInstance).where(
+                    BackendInstance.heartbeat_at < now - timedelta(days=1)
+                )
+            )
         ).rowcount  # type: ignore[attr-defined]
         removed["enrollment_tokens"] = (
             await db.execute(

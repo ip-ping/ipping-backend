@@ -23,23 +23,25 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from ..cluster import CHANNEL_EVENTS, Cluster
 from ..models import (
     Measurement,
     MeasurementEvent,
     MeasurementTask,
     Node,
+    NodeConnection,
     Sample,
     new_id,
     new_measurement_id,
     utcnow,
 )
 from ..nodes import protocol as proto
-from ..nodes.registry import NodeConnection, NodeRegistry
+from ..nodes.registry import NodeRegistry
 from ..runtime_settings import RuntimeSettings, load_settings
-from ..security.ratelimit import SlidingWindowLimiter
+from ..security.ratelimit import allow
 from ..security.targets import (
     Denylist,
     Resolver,
@@ -50,7 +52,6 @@ from ..security.targets import (
     system_resolver,
 )
 from . import schemas
-from .events import EventBus
 from .schemas import TASK_ACTIVE, TASK_TERMINAL
 
 log = logging.getLogger(__name__)
@@ -116,17 +117,22 @@ class MeasurementEngine:
         self,
         sessionmaker: async_sessionmaker[AsyncSession],
         registry: NodeRegistry,
-        bus: EventBus,
+        cluster: Cluster,
         resolver: Resolver = system_resolver,
+        *,
+        dispatch_poll_s: float = 1.0,
+        reaper_interval_s: float = 1.0,
+        pending_grace_s: float = 5.0,
     ) -> None:
         self._sessionmaker = sessionmaker
         self.registry = registry
-        self.bus = bus
+        self.cluster = cluster
         self._resolver = resolver
+        self._dispatch_poll_s = dispatch_poll_s
+        self._reaper_interval_s = reaper_interval_s
+        self._pending_grace = timedelta(seconds=pending_grace_s)
         self._locks: dict[str, asyncio.Lock] = {}
-        self._watchers: dict[str, asyncio.Task[None]] = {}
         self._background: set[asyncio.Task[None]] = set()
-        self._create_limiter = SlidingWindowLimiter(limit=10, window_s=60)
 
     # ----------------------------------------------------------------------------------------
     # Plumbing
@@ -148,9 +154,14 @@ class MeasurementEngine:
             ).scalar_one()
             tx = Tx(session, measurement)
             yield tx
+            if tx.events and self.cluster.is_postgres:
+                # Delivered to other processes only if (and when) this transaction commits.
+                await session.execute(
+                    text("SELECT pg_notify(:c, :p)"), {"c": CHANNEL_EVENTS, "p": measurement_id}
+                )
             await session.commit()
-        for event in tx.events:
-            self.bus.publish(measurement_id, event)
+        if tx.events:
+            self.cluster.hub.wake(f"events:{measurement_id}")
         for callback in tx.after_commit:
             self._spawn(callback())
         if tx.measurement.status != "running":
@@ -289,11 +300,10 @@ class MeasurementEngine:
             "measurement created",
             extra={"measurement": measurement_id, "nodes": len(tasks), "kind": "ping"},
         )
-        self.bus.publish(measurement_id, {"seq": 1, "type": "measurement.created", "data": first})
-        self._spawn(self._dispatch(measurement_id))
-        self._watchers[measurement_id] = asyncio.ensure_future(
-            self._watch_deadline(measurement_id, deadline_s)
-        )
+        # Whichever instance holds each node's connection sends that node's task; the deadline reaper
+        # settles anything that is never answered.
+        self.cluster.hub.wake(f"events:{measurement_id}")
+        self.cluster.signal_tasks()
         return measurement_id
 
     async def _check_rate_and_concurrency(
@@ -304,8 +314,9 @@ class MeasurementEngine:
         source_ip: str | None,
     ) -> None:
         if source_ip:
-            self._create_limiter.limit = settings.creations_per_minute_per_ip
-            if not self._create_limiter.allow(source_ip):
+            if not await allow(
+                session, f"create:{source_ip}", settings.creations_per_minute_per_ip, 60
+            ):
                 raise MeasurementError(
                     "rate_limited", "Too many measurements started. Wait a minute and retry.", 429
                 )
@@ -365,13 +376,12 @@ class MeasurementEngine:
         dns_mode: str,
     ) -> list[Node]:
         """The nodes "all" means: approved, online, and able to run this probe, right now."""
-        online = self.registry.online_ids()
+        online = await self.cluster.online_nodes(session)
         approved = (
             (await session.execute(select(Node).where(Node.status == "approved"))).scalars().all()
         )
 
-        def capable(connection: NodeConnection) -> bool:
-            caps = connection.capabilities
+        def capable(caps: proto.Capabilities) -> bool:
             if request.kind not in caps.kinds:
                 return False
             if dns_mode == "fixed" and chosen_ip is not None:
@@ -384,8 +394,8 @@ class MeasurementEngine:
 
         eligible: list[Node] = []
         for node in approved:
-            connection = self.registry.get(node.id)
-            if node.id in online and connection is not None and capable(connection):
+            present = online.get(node.id)
+            if present is not None and capable(present.capabilities):
                 eligible.append(node)
         eligible.sort(key=lambda n: (n.country or "~", n.city or "~", n.name))
 
@@ -412,78 +422,102 @@ class MeasurementEngine:
     # Dispatch, deadline, cancellation
     # ----------------------------------------------------------------------------------------
 
-    async def _dispatch(self, measurement_id: str) -> None:
-        async with self._sessionmaker() as session:
-            measurement = await session.get(Measurement, measurement_id)
-            if measurement is None:
+    async def _fail_undelivered(self, measurement_id: str, task_id: str, reason: str) -> None:
+        async with self._tx(measurement_id) as tx:
+            task = await tx.session.get(MeasurementTask, task_id)
+            if task is None or task.status not in TASK_ACTIVE:
                 return
-            tasks = (
-                (
-                    await session.execute(
-                        select(MeasurementTask).where(
-                            MeasurementTask.measurement_id == measurement_id,
-                            MeasurementTask.status == "pending",
-                        )
-                    )
-                )
-                .scalars()
-                .all()
-            )
-            options = proto.PingOptions.model_validate(measurement.options)
-            if measurement.dns_mode == "fixed":
-                target = proto.TaskTarget(ip=measurement.target_ip, family=measurement.family)
-            else:
-                target = proto.TaskTarget(
-                    hostname=measurement.target_host, family=measurement.family
-                )
-            expires_at = measurement.deadline_at
-            pending = [(t.id, t.node_id, t.attempt_id) for t in tasks]
+            await self._finish_task(tx, task, "node_disconnected", "node_disconnected", reason)
+            await self._maybe_finalize(tx)
 
-        await asyncio.gather(
-            *(
-                self._send_task(
-                    measurement_id,
-                    proto.TaskFrame(
-                        task_id=task_id,
-                        attempt_id=attempt_id,
-                        target=target,
-                        options=options,
-                        expires_at=expires_at,
-                    ),
-                    node_id,
-                )
-                for task_id, node_id, attempt_id in pending
-            )
+    def _task_frame(self, task: MeasurementTask, measurement: Measurement) -> proto.TaskFrame:
+        if measurement.dns_mode == "fixed":
+            target = proto.TaskTarget(ip=measurement.target_ip, family=measurement.family)
+        else:
+            target = proto.TaskTarget(hostname=measurement.target_host, family=measurement.family)
+        return proto.TaskFrame(
+            task_id=task.id,
+            attempt_id=task.attempt_id,
+            target=target,
+            options=proto.PingOptions.model_validate(measurement.options),
+            expires_at=measurement.deadline_at,
         )
 
-    async def _send_task(self, measurement_id: str, frame: proto.TaskFrame, node_id: str) -> None:
-        connection = self.registry.get(node_id)
-        error: str | None = None
-        if connection is None:
-            error = "The node is no longer connected."
-        else:
-            try:
-                await connection.send(frame)
-            except Exception as exc:  # noqa: BLE001 - any send failure means the node is gone
-                error = f"Could not send the task to the node ({type(exc).__name__})."
+    async def _claim_and_send(self, measurement_id: str, task_id: str, node_id: str) -> None:
+        """Take a pending task for a node connected *here*, record that, then send it.
+
+        Claiming (pending -> dispatched, with this instance as owner) happens under the
+        measurement's row lock before anything is sent, so two instances can never send the same
+        task, and a crash between the two steps leaves a task whose owner is visibly dead.
+        """
         async with self._tx(measurement_id) as tx:
-            task = await tx.session.get(MeasurementTask, frame.task_id)
-            if task is None or task.status != "pending":
-                return  # the node already answered, or the task ended some other way
-            if error is not None:
-                await self._finish_task(tx, task, "node_disconnected", "node_disconnected", error)
-                await self._maybe_finalize(tx)
+            task = await tx.session.get(MeasurementTask, task_id)
+            if task is None or task.status != "pending" or tx.measurement.status != "running":
                 return
+            connection = self.registry.get(node_id)
+            if connection is None:
+                return  # the node left in the meantime; the task stays pending for its next owner
+            frame = self._task_frame(task, tx.measurement)
             task.status = "dispatched"
             task.dispatched_at = utcnow()
+            task.owner_instance = self.cluster.instance_id
             tx.emit("task.updated", task_state(task).model_dump(mode="json"))
 
-    async def _watch_deadline(self, measurement_id: str, delay_s: float) -> None:
+            async def deliver() -> None:
+                try:
+                    await connection.send(frame)
+                except Exception as exc:  # noqa: BLE001 - any send failure means the node is gone
+                    await self._fail_undelivered(
+                        measurement_id,
+                        frame.task_id,
+                        f"Could not send the task to the node ({type(exc).__name__}).",
+                    )
+
+            tx.after_commit.append(deliver)
+
+    async def dispatch_pending(self) -> int:
+        """Send every pending task whose node is connected to this instance."""
+        local = self.registry.online_ids()
+        if not local:
+            return 0
+        async with self._sessionmaker() as session:
+            rows = (
+                await session.execute(
+                    select(
+                        MeasurementTask.id, MeasurementTask.measurement_id, MeasurementTask.node_id
+                    )
+                    .join(Measurement, Measurement.id == MeasurementTask.measurement_id)
+                    .where(
+                        MeasurementTask.status == "pending",
+                        MeasurementTask.node_id.in_(local),
+                        Measurement.status == "running",
+                    )
+                    .order_by(Measurement.created_at)
+                    .limit(500)
+                )
+            ).all()
+        await asyncio.gather(*(self._claim_and_send(m, t, n) for t, m, n in rows))
+        return len(rows)
+
+    async def run_dispatcher(self) -> None:
+        waiter = self.cluster.hub.waiter("tasks")
         try:
-            await asyncio.sleep(delay_s)
-        except asyncio.CancelledError:
-            return
-        self._watchers.pop(measurement_id, None)
+            while True:
+                # Woken by new tasks or a node connecting; the timeout is the safety net for a
+                # wake-up that never arrived.
+                await waiter.wait(self._dispatch_poll_s)
+                try:
+                    await self.dispatch_pending()
+                except Exception:
+                    log.exception("dispatching failed")
+        finally:
+            self.cluster.hub.release(waiter)
+
+    # ----------------------------------------------------------------------------------------
+    # The reaper: deadlines, dead instances, abandoned tasks
+    # ----------------------------------------------------------------------------------------
+
+    async def _expire(self, measurement_id: str) -> None:
         async with self._tx(measurement_id) as tx:
             if tx.measurement.status != "running":
                 return
@@ -498,16 +532,142 @@ class MeasurementEngine:
                 )
             await self._maybe_finalize(tx)
 
+    async def _interrupt_orphans(self, measurement_id: str, alive: set[str]) -> None:
+        """Tasks sent by an instance that has stopped can never be answered here: interrupt them."""
+        async with self._tx(measurement_id) as tx:
+            if tx.measurement.status != "running":
+                return
+            interrupted = False
+            for task in await self._active_tasks(tx):
+                if task.owner_instance is not None and task.owner_instance not in alive:
+                    interrupted |= await self._finish_task(
+                        tx,
+                        task,
+                        "interrupted",
+                        "interrupted",
+                        proto.TASK_ERROR_CODES["interrupted"],
+                    )
+            await tx.session.flush()
+            if interrupted and not await self._active_tasks(tx):
+                await self._finalize(tx, "interrupted")
+            else:
+                await self._maybe_finalize(tx)
+
+    async def _fail_stranded(self, measurement_id: str, online: set[str]) -> None:
+        """Pending tasks whose node is gone and has not come back within the grace period."""
+        async with self._tx(measurement_id) as tx:
+            if tx.measurement.status != "running":
+                return
+            if utcnow() - tx.measurement.created_at < self._pending_grace:
+                return
+            for task in await self._active_tasks(tx):
+                if task.status == "pending" and task.node_id not in online:
+                    await self._finish_task(
+                        tx,
+                        task,
+                        "node_disconnected",
+                        "node_disconnected",
+                        "The node went offline before it could receive the task.",
+                    )
+            await self._maybe_finalize(tx)
+
+    async def reap(self) -> None:
+        now = utcnow()
+        async with self._sessionmaker() as session:
+            alive = await self.cluster.alive_instance_ids(session)
+            online = set((await self.cluster.online_nodes(session)).keys())
+            expired = list(
+                (
+                    await session.execute(
+                        select(Measurement.id)
+                        .where(Measurement.status == "running", Measurement.deadline_at <= now)
+                        .limit(100)
+                    )
+                ).scalars()
+            )
+            orphaned = list(
+                (
+                    await session.execute(
+                        select(MeasurementTask.measurement_id)
+                        .join(Measurement, Measurement.id == MeasurementTask.measurement_id)
+                        .where(
+                            Measurement.status == "running",
+                            MeasurementTask.status.in_(("dispatched", "running")),
+                            MeasurementTask.owner_instance.is_not(None),
+                            MeasurementTask.owner_instance.not_in(alive),
+                        )
+                        .distinct()
+                        .limit(100)
+                    )
+                ).scalars()
+            )
+            stranded = list(
+                (
+                    await session.execute(
+                        select(MeasurementTask.measurement_id)
+                        .join(Measurement, Measurement.id == MeasurementTask.measurement_id)
+                        .where(
+                            Measurement.status == "running",
+                            Measurement.created_at < now - self._pending_grace,
+                            MeasurementTask.status == "pending",
+                            MeasurementTask.node_id.not_in(online),
+                        )
+                        .distinct()
+                        .limit(100)
+                    )
+                ).scalars()
+            )
+            # Connections held by instances that are gone do not count as online any more.
+            await session.execute(
+                delete(NodeConnection).where(NodeConnection.instance_id.not_in(alive))
+            )
+            await session.commit()
+        for measurement_id in expired:
+            await self._expire(measurement_id)
+        for measurement_id in orphaned:
+            if measurement_id not in expired:
+                await self._interrupt_orphans(measurement_id, alive)
+        for measurement_id in stranded:
+            if measurement_id not in expired:
+                await self._fail_stranded(measurement_id, online)
+
+    async def run_reaper(self) -> None:
+        while True:
+            try:
+                await self.reap()
+            except Exception:
+                log.exception("reaping failed")
+            await asyncio.sleep(self._reaper_interval_s)
+
+    async def handle_command(self, command: dict[str, Any]) -> None:
+        """Commands other instances broadcast: act on them if the node is connected here."""
+        kind = command.get("type")
+        node_id = str(command.get("node_id", ""))
+        if kind == "close":
+            if command.get("except") == self.cluster.instance_id:
+                return
+            connection = self.registry.get(node_id)
+            if connection is not None:
+                # Unregister before closing: until its handler notices, a connection that is being
+                # closed would otherwise still look like a place to send new tasks to.
+                self.registry.unregister(connection)
+                await connection.close(
+                    int(command.get("code", 4403)), str(command.get("reason", ""))
+                )
+                self.schedule_node_disconnected(node_id)
+        elif kind == "cancel":
+            connection = self.registry.get(node_id)
+            if connection is not None:
+                try:
+                    await connection.send(proto.CancelFrame(task_id=str(command["task_id"])))
+                except Exception:  # noqa: BLE001, S110 - best effort; the node also enforces expiry
+                    pass
+
     def _queue_cancel(self, tx: Tx, task: MeasurementTask) -> None:
         node_id, task_id = task.node_id, task.id
 
         async def send() -> None:
-            connection = self.registry.get(node_id)
-            if connection is not None:
-                try:
-                    await connection.send(proto.CancelFrame(task_id=task_id))
-                except Exception:  # noqa: BLE001, S110 - best effort; the node also enforces expiry
-                    pass
+            await self.cluster.command({"type": "cancel", "node_id": node_id, "task_id": task_id})
 
         tx.after_commit.append(send)
 
@@ -573,9 +733,6 @@ class MeasurementEngine:
         tx.measurement.status = status
         tx.measurement.finished_at = utcnow()
         tx.emit("measurement.finished", {"status": status, "stats": stats.model_dump(mode="json")})
-        watcher = self._watchers.pop(tx.measurement.id, None)
-        if watcher is not None and watcher is not asyncio.current_task():
-            watcher.cancel()
         log.info("measurement finished", extra={"measurement": tx.measurement.id, "status": status})
 
     # ----------------------------------------------------------------------------------------
@@ -700,6 +857,7 @@ class MeasurementEngine:
                         .where(
                             MeasurementTask.node_id == node_id,
                             MeasurementTask.status.in_(TASK_ACTIVE),
+                            MeasurementTask.owner_instance == self.cluster.instance_id,
                         )
                         .distinct()
                     )
@@ -708,6 +866,8 @@ class MeasurementEngine:
         for measurement_id in measurement_ids:
             async with self._tx(measurement_id) as tx:
                 for task in await self._active_tasks(tx, node_id):
+                    if task.owner_instance != self.cluster.instance_id:
+                        continue  # not sent from here: its owner deals with it
                     await self._finish_task(
                         tx,
                         task,
@@ -717,44 +877,20 @@ class MeasurementEngine:
                     )
                 await self._maybe_finalize(tx)
 
+    async def _node_gone(self, node_id: str) -> None:
+        await self.cluster.node_disconnected(node_id)
+        await self.on_node_disconnected(node_id)
+
     def schedule_node_disconnected(self, node_id: str) -> None:
         """Run the disconnect clean-up as its own task.
 
         A connection handler can be cancelled (server shutdown, test harness). Awaiting database
-        work from inside a cancelled task fails on its first await, which would leave the node's
-        tasks looking alive until their deadline.
+        work from inside a cancelled task fails on its first await, which would leave the node
+        looking online and its tasks looking alive until their deadline.
         """
-        self._spawn(self.on_node_disconnected(node_id))
-
-    async def recover_on_startup(self) -> int:
-        """End measurements that were running when the previous process stopped."""
-        async with self._sessionmaker() as session:
-            ids = list(
-                (
-                    await session.execute(
-                        select(Measurement.id).where(Measurement.status == "running")
-                    )
-                ).scalars()
-            )
-        for measurement_id in ids:
-            async with self._tx(measurement_id) as tx:
-                for task in await self._active_tasks(tx):
-                    await self._finish_task(
-                        tx,
-                        task,
-                        "interrupted",
-                        "interrupted",
-                        proto.TASK_ERROR_CODES["interrupted"],
-                    )
-                await self._finalize(tx, "interrupted")
-        if ids:
-            log.warning("interrupted measurements from previous run", extra={"count": len(ids)})
-        return len(ids)
+        self._spawn(self._node_gone(node_id))
 
     async def shutdown(self) -> None:
-        for watcher in list(self._watchers.values()):
-            watcher.cancel()
-        self._watchers.clear()
         for task in list(self._background):
             task.cancel()
         await asyncio.gather(*self._background, return_exceptions=True)

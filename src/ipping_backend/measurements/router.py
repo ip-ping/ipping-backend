@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 from collections.abc import AsyncIterator
 from typing import Annotated, Any
@@ -23,6 +22,9 @@ from ..geolocation.service import location_for
 from ..models import Measurement, MeasurementEvent, User, WebSession
 from . import schemas
 from .engine import Owner
+
+STREAM_POLL_S = 3.0
+KEEPALIVE_S = 15.0
 
 router = APIRouter(
     prefix="/api/v1/measurements",
@@ -152,48 +154,49 @@ async def stream_events(
     if resume is None and last_event_id and last_event_id.isdigit():
         resume = int(last_event_id)
     sessionmaker = request.app.state.sessionmaker
-    bus = engine.bus
+    hub = engine.cluster.hub
 
     async def generate() -> AsyncIterator[str]:
-        # Subscribe before reading history so nothing published in between can be missed.
-        subscription = bus.subscribe(measurement_id)
+        # The event table is the source of truth and the stream just tails it. Being woken (by this
+        # process or, through NOTIFY, another one) makes it prompt; the timer makes it correct even
+        # if a wake-up is lost. Subscribe before the first read so nothing slips between the two.
+        waiter = hub.waiter(f"events:{measurement_id}")
         try:
             last = resume or 0
             yield "retry: 3000\n\n"
-            async with sessionmaker() as s:
-                history = (
-                    (
-                        await s.execute(
-                            select(MeasurementEvent)
-                            .where(
-                                MeasurementEvent.measurement_id == measurement_id,
-                                MeasurementEvent.seq > last,
+            quiet = 0.0
+            while True:
+                async with sessionmaker() as s:
+                    rows = (
+                        (
+                            await s.execute(
+                                select(MeasurementEvent)
+                                .where(
+                                    MeasurementEvent.measurement_id == measurement_id,
+                                    MeasurementEvent.seq > last,
+                                )
+                                .order_by(MeasurementEvent.seq)
+                                .limit(500)
                             )
-                            .order_by(MeasurementEvent.seq)
                         )
+                        .scalars()
+                        .all()
                     )
-                    .scalars()
-                    .all()
-                )
-            for event in history:
-                last = event.seq
-                yield _frame(event.seq, event.type, event.data)
-                if event.type == "measurement.finished":
-                    return
-            while not subscription.overflowed:
-                try:
-                    event_dict = await asyncio.wait_for(subscription.queue.get(), timeout=15)
-                except TimeoutError:
-                    yield ": keep-alive\n\n"
-                    continue
-                if event_dict["seq"] <= last:
-                    continue
-                last = event_dict["seq"]
-                yield _frame(last, event_dict["type"], event_dict["data"])
-                if event_dict["type"] == "measurement.finished":
-                    return
+                for event in rows:
+                    last = event.seq
+                    quiet = 0.0
+                    yield _frame(event.seq, event.type, event.data)
+                    if event.type == "measurement.finished":
+                        return
+                if rows:
+                    continue  # there may be more waiting
+                if not await waiter.wait(STREAM_POLL_S):
+                    quiet += STREAM_POLL_S
+                    if quiet >= KEEPALIVE_S:
+                        quiet = 0.0
+                        yield ": keep-alive\n\n"
         finally:
-            bus.unsubscribe(measurement_id, subscription)
+            hub.release(waiter)
 
     return StreamingResponse(
         generate(),

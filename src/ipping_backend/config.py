@@ -35,6 +35,15 @@ class Settings(BaseSettings):
     host: str = "127.0.0.1"
     port: int = 8000
 
+    # More than one process (several workers, or several hosts) needs PostgreSQL, which is where
+    # they agree on who is alive, which node is connected where, and what happened. Processes need
+    # roughly synchronised clocks (NTP): "alive" is a recent heartbeat.
+    workers: int = 1
+    instance_heartbeat_s: float = 3.0
+    instance_dead_after_s: float = 10.0
+    reaper_interval_s: float = 1.0
+    dispatch_poll_s: float = 1.0
+
     @field_validator("database_url")
     @classmethod
     def _async_driver(cls, value: str) -> str:

@@ -76,6 +76,8 @@ bring up the backend together with the frontend, database and reverse proxy.
 | `IPPING_PUBLIC_URL` | unset | Public origin, used for the same-origin check on writes |
 | `IPPING_COOKIE_SECURE` | `true` | Set `false` only when serving plain HTTP |
 | `IPPING_HOST` / `IPPING_PORT` | `127.0.0.1` / `8000` | Bind address |
+| `IPPING_WORKERS` | `1` | Backend processes (more than one needs PostgreSQL) |
+| `IPPING_INSTANCE_DEAD_AFTER_S` | `10` | How long without a heartbeat before an instance counts as dead |
 | `FORWARDED_ALLOW_IPS` | `127.0.0.1` | Reverse proxies whose `X-Forwarded-*` headers are trusted |
 
 Limits that an operator may need to change while running (emergency stop, per-user and global
@@ -121,11 +123,44 @@ users are.
   Enrollment tokens are single-use and expire; new nodes stay `pending` until an admin approves.
 * Authentication proves *which* node sent a result, not that it measured honestly.
 
+## Running more than one process
+
+`ipping-backend serve --workers 4` (or `IPPING_WORKERS=4`, or `--backend-workers 4` in the installer)
+runs four full backend instances, and instances on other hosts work the same way. They need
+PostgreSQL (SQLite refuses more than one), and roughly synchronised clocks (NTP), because "alive" is
+a recent heartbeat. Any instance can serve any request, hold any node's connection and stream any
+measurement. How:
+
+* **Presence in the database.** Each instance heartbeats a row (`backend_instances`); each node
+  connection is a row (`node_connections`) naming the instance holding the socket. A node is online
+  if its row exists *and* its instance is alive. A clean shutdown removes the rows at once; a crash is
+  noticed after `IPPING_INSTANCE_DEAD_AFTER_S` (10 s).
+* **The owner sends the work.** Creating a measurement only writes tasks. The instance holding a
+  node's connection claims that node's pending tasks under the measurement's row lock (pending to
+  dispatched, recording itself as owner) and then sends them.
+* **A reaper in every instance** closes measurements past their deadline, interrupts tasks whose
+  owner instance died, and fails tasks whose node never came back. Nothing depends on the instance
+  that created a measurement still being alive.
+* **Notifications are hints.** `LISTEN/NOTIFY` wakes other instances (new tasks, new events, commands
+  such as "close this socket" or "cancel this task"); every consumer also polls, so a lost
+  notification costs milliseconds to seconds, never a result. Live streams tail the event table.
+* **Shared limits and setup.** Rate limits are counted in the database; first-run setup is
+  race-proof across instances and they agree on the setup token.
+
+Each instance keeps its own database pool (up to 20 connections) and one `LISTEN` connection, so
+size PostgreSQL's `max_connections` for roughly 21 per instance.
+
+Tested with real processes: three workers, six real nodes spread across them, every measurement
+completing on all nodes whichever worker created it, and the worker holding four nodes killed
+mid-measurement (the measurement settled as `interrupted` with exactly those four tasks, the other
+two completed, and all nodes reconnected). The two-instance behaviour is covered by
+`tests/test_cluster.py`.
+
 ## Known limits
 
-* **One process.** Node connections and live-stream subscribers are in memory, so run exactly one
-  backend process (`serve` enforces `workers=1`). Scaling out needs shared routing first.
-* Only ICMP ping exists so far; location estimation is not implemented.
+* Only ICMP ping exists so far (no TCP, HTTP or traceroute probes).
+* Task delivery is at most once per attempt: a task claimed by an instance that then dies is
+  interrupted, not retried on another node connection.
 
 ## Releases
 
@@ -147,6 +182,7 @@ Small steps, each one committed and logged in [CHANGELOG.md](CHANGELOG.md).
 - [x] API tests also run on PostgreSQL
 - [x] Release workflow: tag or manual run, dry run, version check, image + wheel + lock + contracts
 - [x] First tagged release: v0.1.0
+- [x] More than one backend process or host (shared presence, owner-sends dispatch, reaper)
 - [ ] Per-session / per-IP quota tuning from real traffic
 - [ ] TCP, HTTP and traceroute probes
 - [ ] DNS comparison across nodes

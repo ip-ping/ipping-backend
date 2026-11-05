@@ -4,6 +4,23 @@ Progress log for `ipping-backend`, newest first. Each entry is one small, tested
 
 ## Unreleased
 
+### 2026-11-05: more than one backend process
+- Several backend processes (or hosts) can serve one deployment, with PostgreSQL as the only shared
+  piece: instance heartbeats and node-connection presence in tables, the instance holding a node's
+  connection claims and sends that node's tasks, a reaper in every instance settles deadlines, dead
+  instances and abandoned tasks, and `LISTEN/NOTIFY` wakes the others (every consumer also polls, so a
+  lost notification costs latency, never a result). Live streams tail the event table.
+- Rate limits are counted in the database and first-run setup is race-proof across instances, with a
+  shared setup token. `serve --workers N` / `IPPING_WORKERS`. Migration 0003.
+- Replaces the startup "interrupt everything" step and the per-measurement timers, which assumed one
+  process. Restart recovery is now immediate for a clean stop and takes up to the dead-instance timeout
+  after a crash.
+- Found by the tests and fixed: a node's old socket stayed registered while being closed by a remote
+  instance, so a new task could be claimed for it and fail.
+- Real run: 3 worker processes, 6 real nodes; the worker holding 4 nodes was killed mid-measurement,
+  the measurement settled in 7.4 s as `interrupted` with exactly those 4 tasks (the other 2 completed)
+  and every node reconnected. 8 two-instance tests in `tests/test_cluster.py` (PostgreSQL only).
+
 ## v0.2.0 (2026-11-05)
 
 ### 2026-11-04: estimated network location

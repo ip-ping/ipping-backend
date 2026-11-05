@@ -161,7 +161,10 @@ class Measurement(Base):
     deadline_at: Mapped[datetime] = mapped_column(UTCDateTime)
     finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
 
-    __table_args__ = (Index("ix_measurements_owner_status", "owner_session_id", "status"),)
+    __table_args__ = (
+        Index("ix_measurements_owner_status", "owner_session_id", "status"),
+        Index("ix_measurements_status_deadline", "status", "deadline_at"),
+    )
 
 
 class MeasurementTask(Base):
@@ -184,6 +187,9 @@ class MeasurementTask(Base):
     tested_ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
     resolved_ips: Mapped[list[str]] = mapped_column(JSON, default=list)
     summary: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
+    # The backend instance that sent the task to the node (and holds that node's connection). If
+    # that instance stops answering, its unfinished tasks are interrupted.
+    owner_instance: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     dispatched_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
 
@@ -231,6 +237,41 @@ class LocationEstimate(Base):
     model_version: Mapped[str] = mapped_column(String(40))
     result: Mapped[dict[str, Any]] = mapped_column(JSON)
     computed_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
+class BackendInstance(Base):
+    """One running backend process. It proves it is alive by refreshing `heartbeat_at`."""
+
+    __tablename__ = "backend_instances"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    version: Mapped[str] = mapped_column(String(32))
+    started_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    heartbeat_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+
+class NodeConnection(Base):
+    """Which backend instance currently holds each node's WebSocket (shared view of "online")."""
+
+    __tablename__ = "node_connections"
+
+    node_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    instance_id: Mapped[str] = mapped_column(String(32), index=True)
+    connected_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    protocol_version: Mapped[int] = mapped_column(Integer)
+    capabilities: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+
+
+class RateEvent(Base):
+    """One counted hit for a rate limit, in the database so every instance sees the same count."""
+
+    __tablename__ = "rate_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    key: Mapped[str] = mapped_column(String(100))
+    at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+
+    __table_args__ = (Index("ix_rate_events_key_at", "key", "at"),)
 
 
 class AuditEvent(Base):
