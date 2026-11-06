@@ -701,7 +701,7 @@
         "type": "object"
       },
       "HttpDetail": {
-        "description": "What one HTTP request found. Times are microseconds, measured on the node.",
+        "description": "What one HTTP request found. Times are microseconds, measured on the node.\n\n`total_us` covers the whole exchange, redirects included. The phases (`dns_us`, `connect_us`,\n`tls_us`, `ttfb_us`) and `tls` belong to the final request, whose address is `final_host`.",
         "properties": {
           "connect_us": {
             "anyOf": [

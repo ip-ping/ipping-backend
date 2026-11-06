@@ -239,6 +239,8 @@ SAMPLE_ERROR_CODES = {
     "protocol_error": "The server did not answer with valid HTTP.",
     "too_many_redirects": "The redirect limit was reached.",
     "redirect_blocked": "A redirect pointed somewhere that is not allowed.",
+    "dns_failure": "A redirect pointed at a name that could not be resolved.",
+    "unsupported_family": "The node has no connectivity for this IP version.",
     "permission_denied": "The node is not allowed to run this probe.",
     "send_failed": "The probe could not be sent.",
 }
@@ -294,7 +296,11 @@ class RedirectHop(_Frame):
 
 
 class HttpDetail(_Frame):
-    """What one HTTP request found. Times are microseconds, measured on the node."""
+    """What one HTTP request found. Times are microseconds, measured on the node.
+
+    `total_us` covers the whole exchange, redirects included. The phases (`dns_us`, `connect_us`,
+    `tls_us`, `ttfb_us`) and `tls` belong to the final request, whose address is `final_host`.
+    """
 
     status_code: int | None = Field(default=None, ge=100, le=599)
     http_version: str | None = Field(default=None, max_length=8)
