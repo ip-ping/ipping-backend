@@ -9,11 +9,30 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import AppSetting
+from .nodes.protocol import PROBE_KINDS
+
+# Ports a TCP or HTTP check may target. A short list, because a measurement service that connects
+# to any port of any host is a port scanner for hire.
+DEFAULT_ALLOWED_PORTS = [
+    22, 25, 53, 80, 110, 143, 443, 465, 587, 853, 993, 995, 3306, 3389, 5432, 8080, 8443,
+]  # fmt: skip
+
+
+def _check_kinds(value: list[str] | None) -> list[str] | None:
+    if value is not None and any(k not in PROBE_KINDS for k in value):
+        raise ValueError(f"kinds must be among {', '.join(PROBE_KINDS)}")
+    return value
+
+
+def _check_ports(value: list[int] | None) -> list[int] | None:
+    if value is not None and any(not 0 < p < 65536 for p in value):
+        raise ValueError("ports must be between 1 and 65535")
+    return sorted(set(value)) if value is not None else None
 
 
 class RuntimeSettings(BaseModel):
@@ -33,6 +52,18 @@ class RuntimeSettings(BaseModel):
     target_denylist: list[str] = Field(default_factory=list, max_length=1000)
     sample_retention_days: int = Field(default=7, ge=1, le=3650)
     measurement_retention_days: int = Field(default=90, ge=1, le=3650)
+    # Which kinds of measurement can be started (a node must also support the kind).
+    enabled_kinds: list[str] = Field(default_factory=lambda: list(PROBE_KINDS), max_length=8)
+    # Destination ports for tcp and http checks.
+    allowed_ports: list[int] = Field(
+        default_factory=lambda: list(DEFAULT_ALLOWED_PORTS), max_length=200
+    )
+    # Most redirects an http check may follow; 0 turns following off.
+    max_redirects: int = Field(default=5, ge=0, le=5)
+    traceroute_max_hops: int = Field(default=30, ge=5, le=30)
+
+    validate_kinds = field_validator("enabled_kinds")(_check_kinds)
+    validate_ports = field_validator("allowed_ports")(_check_ports)
 
 
 class RuntimeSettingsUpdate(BaseModel):
@@ -50,6 +81,13 @@ class RuntimeSettingsUpdate(BaseModel):
     target_denylist: list[str] | None = Field(default=None, max_length=1000)
     sample_retention_days: int | None = Field(default=None, ge=1, le=3650)
     measurement_retention_days: int | None = Field(default=None, ge=1, le=3650)
+    enabled_kinds: list[str] | None = Field(default=None, max_length=8)
+    allowed_ports: list[int] | None = Field(default=None, max_length=200)
+    max_redirects: int | None = Field(default=None, ge=0, le=5)
+    traceroute_max_hops: int | None = Field(default=None, ge=5, le=30)
+
+    validate_kinds = field_validator("enabled_kinds")(_check_kinds)
+    validate_ports = field_validator("allowed_ports")(_check_ports)
 
 
 async def load_settings(session: AsyncSession) -> RuntimeSettings:

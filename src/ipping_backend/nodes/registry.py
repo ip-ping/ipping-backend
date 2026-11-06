@@ -25,7 +25,9 @@ class NodeConnection:
 
     async def send(self, frame: BaseModel, timeout: float = 5.0) -> None:
         async with self._send_lock:
-            await asyncio.wait_for(self.websocket.send_text(frame.model_dump_json()), timeout)
+            await asyncio.wait_for(
+                self.websocket.send_text(frame.model_dump_json(exclude_none=True)), timeout
+            )
 
     async def close(self, code: int, reason: str = "") -> None:
         try:

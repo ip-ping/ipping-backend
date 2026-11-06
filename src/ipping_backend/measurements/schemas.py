@@ -8,6 +8,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from ..nodes.protocol import HopDetail, HttpDetail, ProbeKind
+
 TASK_ACTIVE = ("pending", "dispatched", "running")
 TASK_TERMINAL = (
     "completed",
@@ -21,7 +23,25 @@ TASK_TERMINAL = (
 
 class CreateMeasurementRequest(BaseModel):
     target: str = Field(min_length=1, max_length=2048, description="IP address, hostname or URL")
-    kind: Literal["ping"] = "ping"
+    kind: ProbeKind = Field(
+        default="ping",
+        description=(
+            "ping: ICMP echo. tcp: time to open a TCP connection to `port`. http: one request, "
+            "with timings and the TLS certificate. traceroute: the routers on the way."
+        ),
+    )
+    port: int | None = Field(
+        default=None,
+        ge=1,
+        le=65535,
+        description=(
+            "Destination port of a tcp check. For tcp it can also be given as host:port or in a "
+            "URL. An http check takes its port from the URL."
+        ),
+    )
+    follow_redirects: bool = Field(
+        default=False, description="http only: follow redirects (up to the deployment's limit)"
+    )
     dns_mode: Literal["fixed", "regional"] = Field(
         default="fixed",
         description=(
@@ -30,7 +50,9 @@ class CreateMeasurementRequest(BaseModel):
         ),
     )
     family: Literal["auto", "4", "6"] = "auto"
-    count: int | None = Field(default=None, ge=1, le=10, description="Echo requests per node")
+    count: int | None = Field(
+        default=None, ge=1, le=10, description="ping and tcp: probes per node"
+    )
     node_ids: list[str] | None = Field(
         default=None, max_length=1000, description="Limit to these nodes; omit for all eligible"
     )
@@ -65,6 +87,9 @@ class NodeInfo(BaseModel):
 
 
 class Summary(BaseModel):
+    """ping and tcp: probes sent and answered. http: the one request. traceroute: hops probed and
+    hops that answered, with the timings of the destination when it was reached."""
+
     sent: int
     received: int
     loss_pct: float
@@ -72,6 +97,9 @@ class Summary(BaseModel):
     median_ms: float | None = None
     avg_ms: float | None = None
     max_ms: float | None = None
+    reached: bool | None = Field(
+        default=None, description="traceroute only: whether the destination answered"
+    )
 
 
 class SampleOut(BaseModel):
@@ -79,6 +107,8 @@ class SampleOut(BaseModel):
     status: Literal["ok", "timeout", "error"]
     rtt_ms: float | None = None
     error_code: str | None = None
+    http: HttpDetail | None = Field(default=None, description="http: what the request found")
+    hop: HopDetail | None = Field(default=None, description="traceroute: the router at this hop")
 
 
 class TaskStateOut(BaseModel):
@@ -96,10 +126,17 @@ class TaskOut(TaskStateOut):
     samples: list[SampleOut] = []
 
 
-class PingOptionsOut(BaseModel):
+class MeasurementOptions(BaseModel):
+    """The settings a measurement was run with; which ones are present depends on its kind."""
+
     count: int
     interval_ms: int
     timeout_ms: int
+    port: int | None = None
+    scheme: Literal["http", "https"] | None = None
+    path: str | None = None
+    max_redirects: int | None = None
+    max_hops: int | None = None
 
 
 class TargetOut(BaseModel):
@@ -126,7 +163,7 @@ class MeasurementOut(BaseModel):
     target: TargetOut
     dns_mode: Literal["fixed", "regional"]
     family: Literal["auto", "4", "6"]
-    options: PingOptionsOut
+    options: MeasurementOptions
     shared: bool
     created_at: datetime
     deadline_at: datetime
@@ -140,25 +177,49 @@ class ShareRequest(BaseModel):
     shared: bool
 
 
-def summarize(samples: list[SampleOut]) -> Summary | None:
+def summarize(samples: list[SampleOut], kind: str = "ping") -> Summary | None:
     if not samples:
         return None
+    if kind == "traceroute":
+        return _summarize_route(samples)
     rtts = [s.rtt_ms for s in samples if s.status == "ok" and s.rtt_ms is not None]
     sent = len(samples)
     received = len(rtts)
     summary = Summary(
         sent=sent, received=received, loss_pct=round((sent - received) * 100 / sent, 1)
     )
+    _fill_timings(summary, rtts)
+    return summary
+
+
+def _fill_timings(summary: Summary, rtts: list[float]) -> None:
     if rtts:
         summary.min_ms = round(min(rtts), 3)
         summary.max_ms = round(max(rtts), 3)
         summary.avg_ms = round(statistics.fmean(rtts), 3)
         summary.median_ms = round(statistics.median(rtts), 3)
+
+
+def _summarize_route(samples: list[SampleOut]) -> Summary:
+    """Hops that answered are not "received": silent routers are normal. What matters is whether
+    the destination was reached, and how long it took."""
+    answered = sum(1 for s in samples if s.status == "ok")
+    destination = next((s for s in samples if s.hop is not None and s.hop.reached), None)
+    summary = Summary(
+        sent=len(samples),
+        received=answered,
+        loss_pct=round((len(samples) - answered) * 100 / len(samples), 1),
+        reached=destination is not None,
+    )
+    if destination is not None and destination.hop is not None:
+        _fill_timings(summary, [rtt / 1000 for rtt in destination.hop.rtts_us])
     return summary
 
 
 def compute_stats(tasks: list[TaskStateOut]) -> MeasurementStats:
-    responding = [t for t in tasks if t.summary and t.summary.received > 0]
+    responding = [
+        t for t in tasks if t.summary and t.summary.received > 0 and t.summary.reached is not False
+    ]
     failed = [
         t for t in tasks if t.status in ("failed", "timed_out", "node_disconnected", "interrupted")
     ]

@@ -84,6 +84,21 @@ Limits that an operator may need to change while running (emergency stop, per-us
 probe budgets, target denylist, retention) live in the database and are edited through
 `PATCH /api/v1/admin/settings`.
 
+## Kinds of measurement
+
+| `kind` | What one sample is | Notes |
+| --- | --- | --- |
+| `ping` | an ICMP echo request | `count` 1 to 10 |
+| `tcp` | opening a TCP connection | needs a port (`host:port`, or `port`) from the allowed list; `count` 1 to 10; a refusal keeps its time but is not a success |
+| `http` | one request | scheme, port and path come from the URL (query strings are dropped); `follow_redirects` to follow up to 5; timings, status, certificate |
+| `traceroute` | one hop | up to 30 hops, three probes each; non-public hops are shown as private; Linux nodes only |
+
+Which kinds a node can run is part of its hello (`capabilities.kinds`); a measurement only goes to
+nodes that can run it, and asking for a kind none of the online nodes supports says so. Administrators
+can switch kinds off and edit the port list (`enabled_kinds`, `allowed_ports`). Redirects are
+re-checked for public addresses on the node at every hop, but the denylist only applies to the first
+address, so turn following off (`max_redirects: 0`) if that matters on your deployment.
+
 ## Estimated network location (experimental)
 
 `GET /api/v1/measurements/{id}/location` says where the target address *appears* to be, from the
@@ -158,7 +173,8 @@ two completed, and all nodes reconnected). The two-instance behaviour is covered
 
 ## Known limits
 
-* Only ICMP ping exists so far (no TCP, HTTP or traceroute probes).
+* Traceroute needs Linux on the node (it uses the kernel's ICMP error queue).
+* A TCP or HTTP check connects to a destination the user chose, from the node's address, on the allowed ports only. Nodes should not be on networks where that is unwelcome.
 * Task delivery is at most once per attempt: a task claimed by an instance that then dies is
   interrupted, not retried on another node connection.
 
@@ -184,7 +200,8 @@ Small steps, each one committed and logged in [CHANGELOG.md](CHANGELOG.md).
 - [x] First tagged release: v0.1.0
 - [x] More than one backend process or host (shared presence, owner-sends dispatch, reaper)
 - [ ] Per-session / per-IP quota tuning from real traffic
-- [ ] TCP, HTTP and traceroute probes
+- [x] TCP, HTTP and traceroute: backend side (protocol, planning, validation, tests)
+- [ ] TCP, HTTP and traceroute: node side and frontend
 - [ ] DNS comparison across nodes
 - [x] Estimated network location: constraint-based, evidence listed, explicit "insufficient evidence" (checked on synthetic paths only)
 - [ ] Calibrate the location model against real targets of known location (and optionally GeoIP / ASN / geofeed evidence)

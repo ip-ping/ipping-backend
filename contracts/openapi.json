@@ -327,7 +327,7 @@
                 "type": "null"
               }
             ],
-            "description": "Echo requests per node",
+            "description": "ping and tcp: probes per node",
             "title": "Count"
           },
           "countries": {
@@ -366,9 +366,21 @@
             "title": "Family",
             "type": "string"
           },
+          "follow_redirects": {
+            "default": false,
+            "description": "http only: follow redirects (up to the deployment's limit)",
+            "title": "Follow Redirects",
+            "type": "boolean"
+          },
           "kind": {
-            "const": "ping",
             "default": "ping",
+            "description": "ping: ICMP echo. tcp: time to open a TCP connection to `port`. http: one request, with timings and the TLS certificate. traceroute: the routers on the way.",
+            "enum": [
+              "ping",
+              "tcp",
+              "http",
+              "traceroute"
+            ],
             "title": "Kind",
             "type": "string"
           },
@@ -387,6 +399,20 @@
             ],
             "description": "Limit to these nodes; omit for all eligible",
             "title": "Node Ids"
+          },
+          "port": {
+            "anyOf": [
+              {
+                "maximum": 65535.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Destination port of a tcp check. For tcp it can also be given as host:port or in a URL. An http check takes its port from the URL.",
+            "title": "Port"
           },
           "target": {
             "description": "IP address, hostname or URL",
@@ -628,6 +654,227 @@
         "title": "HTTPValidationError",
         "type": "object"
       },
+      "HopDetail": {
+        "description": "One traceroute hop: the router that answered at this TTL.\n\n`ip` is only ever a public address. A router inside the node operator's own network (or any\nother non-public address) is reported as `private` with no address, so a result never\ndiscloses the layout of someone's LAN.",
+        "properties": {
+          "ip": {
+            "anyOf": [
+              {
+                "maxLength": 45,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ip"
+          },
+          "private": {
+            "default": false,
+            "title": "Private",
+            "type": "boolean"
+          },
+          "reached": {
+            "default": false,
+            "title": "Reached",
+            "type": "boolean"
+          },
+          "rtts_us": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 3,
+            "title": "Rtts Us",
+            "type": "array"
+          },
+          "ttl": {
+            "maximum": 64.0,
+            "minimum": 1.0,
+            "title": "Ttl",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ttl"
+        ],
+        "title": "HopDetail",
+        "type": "object"
+      },
+      "HttpDetail": {
+        "description": "What one HTTP request found. Times are microseconds, measured on the node.",
+        "properties": {
+          "connect_us": {
+            "anyOf": [
+              {
+                "maximum": 60000000.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connect Us"
+          },
+          "content_type": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Type"
+          },
+          "dns_us": {
+            "anyOf": [
+              {
+                "maximum": 60000000.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dns Us"
+          },
+          "final_host": {
+            "anyOf": [
+              {
+                "maxLength": 253,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Final Host"
+          },
+          "final_path": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Final Path"
+          },
+          "final_scheme": {
+            "anyOf": [
+              {
+                "maxLength": 8,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Final Scheme"
+          },
+          "http_version": {
+            "anyOf": [
+              {
+                "maxLength": 8,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Http Version"
+          },
+          "redirects": {
+            "items": {
+              "$ref": "#/components/schemas/RedirectHop"
+            },
+            "maxItems": 6,
+            "title": "Redirects",
+            "type": "array"
+          },
+          "server": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Server"
+          },
+          "status_code": {
+            "anyOf": [
+              {
+                "maximum": 599.0,
+                "minimum": 100.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status Code"
+          },
+          "tls": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TlsInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tls_us": {
+            "anyOf": [
+              {
+                "maximum": 60000000.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tls Us"
+          },
+          "total_us": {
+            "anyOf": [
+              {
+                "maximum": 60000000.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Us"
+          },
+          "ttfb_us": {
+            "anyOf": [
+              {
+                "maximum": 60000000.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ttfb Us"
+          }
+        },
+        "title": "HttpDetail",
+        "type": "object"
+      },
       "LocationEstimateOut": {
         "properties": {
           "alternatives": {
@@ -765,6 +1012,89 @@
         "title": "LoginRequest",
         "type": "object"
       },
+      "MeasurementOptions": {
+        "description": "The settings a measurement was run with; which ones are present depends on its kind.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "interval_ms": {
+            "title": "Interval Ms",
+            "type": "integer"
+          },
+          "max_hops": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Hops"
+          },
+          "max_redirects": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Redirects"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Path"
+          },
+          "port": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Port"
+          },
+          "scheme": {
+            "anyOf": [
+              {
+                "enum": [
+                  "http",
+                  "https"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheme"
+          },
+          "timeout_ms": {
+            "title": "Timeout Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "count",
+          "interval_ms",
+          "timeout_ms"
+        ],
+        "title": "MeasurementOptions",
+        "type": "object"
+      },
       "MeasurementOut": {
         "properties": {
           "created_at": {
@@ -819,7 +1149,7 @@
             "type": "integer"
           },
           "options": {
-            "$ref": "#/components/schemas/PingOptionsOut"
+            "$ref": "#/components/schemas/MeasurementOptions"
           },
           "shared": {
             "title": "Shared",
@@ -1036,29 +1366,6 @@
         "title": "NodeInfo",
         "type": "object"
       },
-      "PingOptionsOut": {
-        "properties": {
-          "count": {
-            "title": "Count",
-            "type": "integer"
-          },
-          "interval_ms": {
-            "title": "Interval Ms",
-            "type": "integer"
-          },
-          "timeout_ms": {
-            "title": "Timeout Ms",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "count",
-          "interval_ms",
-          "timeout_ms"
-        ],
-        "title": "PingOptionsOut",
-        "type": "object"
-      },
       "PlaceOut": {
         "properties": {
           "country": {
@@ -1204,6 +1511,76 @@
         "title": "PublicNode",
         "type": "object"
       },
+      "RedirectHop": {
+        "description": "A redirect that was followed or stopped at. Never carries a query string.",
+        "properties": {
+          "followed": {
+            "default": false,
+            "title": "Followed",
+            "type": "boolean"
+          },
+          "location_host": {
+            "anyOf": [
+              {
+                "maxLength": 253,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location Host"
+          },
+          "location_path": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location Path"
+          },
+          "location_port": {
+            "anyOf": [
+              {
+                "maximum": 65535.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location Port"
+          },
+          "location_scheme": {
+            "anyOf": [
+              {
+                "maxLength": 8,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location Scheme"
+          },
+          "status_code": {
+            "maximum": 399.0,
+            "minimum": 300.0,
+            "title": "Status Code",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "status_code"
+        ],
+        "title": "RedirectHop",
+        "type": "object"
+      },
       "RotatedCredential": {
         "properties": {
           "credential": {
@@ -1225,6 +1602,14 @@
       },
       "RuntimeSettings": {
         "properties": {
+          "allowed_ports": {
+            "items": {
+              "type": "integer"
+            },
+            "maxItems": 200,
+            "title": "Allowed Ports",
+            "type": "array"
+          },
           "creations_per_minute_per_ip": {
             "default": 10,
             "maximum": 600.0,
@@ -1238,6 +1623,14 @@
             "minimum": 1.0,
             "title": "Default Count",
             "type": "integer"
+          },
+          "enabled_kinds": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "Enabled Kinds",
+            "type": "array"
           },
           "max_concurrent_per_ip": {
             "default": 4,
@@ -1274,6 +1667,13 @@
             "title": "Max Probes Per Measurement",
             "type": "integer"
           },
+          "max_redirects": {
+            "default": 5,
+            "maximum": 5.0,
+            "minimum": 0.0,
+            "title": "Max Redirects",
+            "type": "integer"
+          },
           "measurement_deadline_s": {
             "default": 30,
             "maximum": 300.0,
@@ -1307,6 +1707,13 @@
             "maxItems": 1000,
             "title": "Target Denylist",
             "type": "array"
+          },
+          "traceroute_max_hops": {
+            "default": 30,
+            "maximum": 30.0,
+            "minimum": 5.0,
+            "title": "Traceroute Max Hops",
+            "type": "integer"
           }
         },
         "title": "RuntimeSettings",
@@ -1315,6 +1722,21 @@
       "RuntimeSettingsUpdate": {
         "description": "Every field optional: only the ones that are sent change.",
         "properties": {
+          "allowed_ports": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "maxItems": 200,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Ports"
+          },
           "creations_per_minute_per_ip": {
             "anyOf": [
               {
@@ -1340,6 +1762,21 @@
               }
             ],
             "title": "Default Count"
+          },
+          "enabled_kinds": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 8,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled Kinds"
           },
           "max_concurrent_per_ip": {
             "anyOf": [
@@ -1406,6 +1843,19 @@
             ],
             "title": "Max Probes Per Measurement"
           },
+          "max_redirects": {
+            "anyOf": [
+              {
+                "maximum": 5.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Redirects"
+          },
           "measurement_deadline_s": {
             "anyOf": [
               {
@@ -1470,6 +1920,19 @@
               }
             ],
             "title": "Target Denylist"
+          },
+          "traceroute_max_hops": {
+            "anyOf": [
+              {
+                "maximum": 30.0,
+                "minimum": 5.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Traceroute Max Hops"
           }
         },
         "title": "RuntimeSettingsUpdate",
@@ -1487,6 +1950,28 @@
               }
             ],
             "title": "Error Code"
+          },
+          "hop": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HopDetail"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "traceroute: the router at this hop"
+          },
+          "http": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/HttpDetail"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "http: what the request found"
           },
           "rtt_ms": {
             "anyOf": [
@@ -1644,6 +2129,7 @@
         "type": "object"
       },
       "Summary": {
+        "description": "ping and tcp: probes sent and answered. http: the one request. traceroute: hops probed and\nhops that answered, with the timings of the destination when it was reached.",
         "properties": {
           "avg_ms": {
             "anyOf": [
@@ -1692,6 +2178,18 @@
               }
             ],
             "title": "Min Ms"
+          },
+          "reached": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "traceroute only: whether the destination answered",
+            "title": "Reached"
           },
           "received": {
             "title": "Received",
@@ -1834,6 +2332,101 @@
           "status"
         ],
         "title": "TaskOut",
+        "type": "object"
+      },
+      "TlsInfo": {
+        "properties": {
+          "cipher": {
+            "anyOf": [
+              {
+                "maxLength": 64,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cipher"
+          },
+          "issuer": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issuer"
+          },
+          "not_after": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Not After"
+          },
+          "not_before": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Not Before"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          },
+          "verified": {
+            "default": false,
+            "title": "Verified",
+            "type": "boolean"
+          },
+          "verify_error": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Verify Error"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "maxLength": 16,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          }
+        },
+        "title": "TlsInfo",
         "type": "object"
       },
       "TokenCreated": {

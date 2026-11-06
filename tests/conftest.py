@@ -123,12 +123,12 @@ def node_headers(credential: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {credential}"}
 
 
-def hello(ipv4: bool = True, ipv6: bool = True) -> str:
+def hello(ipv4: bool = True, ipv6: bool = True, kinds: tuple[str, ...] = ("ping",)) -> str:
     return json.dumps(
         {
             "type": "hello",
             "protocol_versions": [1],
             "node_version": "0.1.0",
-            "capabilities": {"kinds": ["ping"], "ipv4": ipv4, "ipv6": ipv6},
+            "capabilities": {"kinds": list(kinds), "ipv4": ipv4, "ipv6": ipv6},
         }
     )

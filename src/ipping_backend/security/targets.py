@@ -2,9 +2,10 @@
 
 Two steps, kept separate on purpose:
 
-1. `parse_target` turns whatever was typed (an IP, a hostname, a pasted URL) into a host. Only the
-   host survives: credentials, ports, paths and query strings are dropped here, so nothing
-   sensitive can reach a log line or the database.
+1. `parse_target` turns whatever was typed (an IP, a hostname, a pasted URL) into a host, and for
+   the probes that need them a scheme, a port and a path. Credentials and query strings are
+   dropped here, so nothing sensitive can reach a log line or the database. A ping ignores the
+   port and path; only an http check uses the path.
 2. `resolve_target` resolves hostnames and applies the address policy to every address returned,
    then pins the address that will actually be probed. A hostname is never validated and then
    resolved a second time by something else (the DNS-rebinding trap).
@@ -20,7 +21,7 @@ import re
 import socket
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 IPAddress = ipaddress.IPv4Address | ipaddress.IPv6Address
 
@@ -63,11 +64,17 @@ class TargetError(Exception):
         self.message = message
 
 
+MAX_PATH_LENGTH = 200
+
+
 @dataclass(frozen=True)
 class ParsedTarget:
     host: str  # hostname (ASCII/punycode) or a normalised IP literal
     ip: IPAddress | None
     input_kind: str  # "ip" | "hostname" | "url"
+    port: int | None = None  # as typed (host:port or a URL); None when the input had none
+    scheme: str | None = None  # "http" or "https" when the input was a URL
+    path: str = ""  # percent-encoded, no query string; empty when the input had none
 
 
 @dataclass(frozen=True)
@@ -114,37 +121,58 @@ def _invalid(message: str) -> TargetError:
     return TargetError("invalid_target", message)
 
 
-def _extract_host(text: str) -> tuple[str, bool]:
-    """Return (host, came_from_url_or_host_with_extras)."""
+@dataclass(frozen=True)
+class _Extracted:
+    host: str
+    from_url: bool
+    scheme: str | None = None
+    port: int | None = None
+    path: str = ""
+
+
+def _clean_path(raw: str) -> str:
+    """Keep the path of a URL, percent-encoded; a query string or fragment is never kept."""
+    if not raw or raw == "/":
+        return ""
+    path = quote(raw, safe="/%:@!$&'()*+,;=-._~")
+    if len(path) > MAX_PATH_LENGTH:
+        raise _invalid("The URL path is too long.")
+    return path
+
+
+def _extract_host(text: str) -> _Extracted:
     try:
         if "://" in text:
             parts = urlsplit(text)
-            if parts.scheme.lower() not in ("http", "https"):
+            scheme = parts.scheme.lower()
+            if scheme not in ("http", "https"):
                 raise TargetError(
                     "unsupported_scheme", "Only http:// and https:// URLs are accepted."
                 )
-            host, from_url = parts.hostname, True
-            _ = parts.port  # raises ValueError for an out-of-range port
+            host = parts.hostname
+            port = parts.port  # raises ValueError for an out-of-range port
+            result = _Extracted(host or "", True, scheme, port, _clean_path(parts.path))
         elif any(c in text for c in "/?#@"):
             parts = urlsplit("//" + text)
-            host, from_url = parts.hostname, True
-            _ = parts.port
+            host, port = parts.hostname, parts.port
+            result = _Extracted(host or "", True, None, port, _clean_path(parts.path))
         elif text.startswith("["):
             parts = urlsplit("//" + text)
-            host, from_url = parts.hostname, False
-            _ = parts.port
+            result = _Extracted(parts.hostname or "", False, None, parts.port)
         elif text.count(":") == 1:  # host:port or ipv4:port; a bare IPv6 has more colons
-            host, port = text.rsplit(":", 1)
-            if not port.isdigit() or not 0 < int(port) < 65536:
+            host, port_text = text.rsplit(":", 1)
+            if not port_text.isdigit() or not 0 < int(port_text) < 65536:
                 raise _invalid("That does not look like a valid host and port.")
-            from_url = False
+            result = _Extracted(host, False, None, int(port_text))
         else:
-            host, from_url = text, False
+            result = _Extracted(text, False)
     except ValueError as exc:
         raise _invalid("That does not look like a valid address or URL.") from exc
-    if not host:
+    if not result.host:
         raise _invalid("No host found in the input.")
-    return host, from_url
+    if result.port is not None and not 0 < result.port < 65536:
+        raise _invalid("That is not a valid port.")
+    return result
 
 
 def parse_target(raw: str) -> ParsedTarget:
@@ -156,8 +184,8 @@ def parse_target(raw: str) -> ParsedTarget:
     if any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in text):
         raise _invalid("The input contains whitespace or control characters.")
 
-    host, from_url = _extract_host(text)
-    host = host.lower().rstrip(".")
+    found = _extract_host(text)
+    host, from_url = found.host.lower().rstrip("."), found.from_url
 
     try:
         ip: IPAddress | None = ipaddress.ip_address(host)
@@ -167,7 +195,8 @@ def parse_target(raw: str) -> ParsedTarget:
         if getattr(ip, "scope_id", None):
             raise _invalid("Scoped IPv6 addresses are not accepted.")
         ip = normalise_ip(ip)
-        return ParsedTarget(str(ip), ip, "url" if from_url else "ip")
+        kind = "url" if from_url else "ip"
+        return ParsedTarget(str(ip), ip, kind, found.port, found.scheme, found.path)
 
     try:
         host = host.encode("idna").decode("ascii")
@@ -183,7 +212,8 @@ def parse_target(raw: str) -> ParsedTarget:
     # label is refused instead of being handed to one.
     if labels[-1].isdigit():
         raise _invalid("That is not a valid public hostname.")
-    return ParsedTarget(host, None, "url" if from_url else "hostname")
+    kind = "url" if from_url else "hostname"
+    return ParsedTarget(host, None, kind, found.port, found.scheme, found.path)
 
 
 Resolver = Callable[[str], Awaitable[list[str]]]

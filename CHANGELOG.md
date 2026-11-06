@@ -4,6 +4,31 @@ Progress log for `ipping-backend`, newest first. Each entry is one small, tested
 
 ## Unreleased
 
+### 2026-11-06: TCP, HTTP and traceroute measurements (backend side)
+- `kind` on `POST /api/v1/measurements` now accepts `tcp`, `http` and `traceroute` besides `ping`.
+  Protocol v1 stays v1: the changes are additive (`TaskTarget.port`/`server_name`, `TaskOptions`
+  replacing `PingOptions`, `SampleFrame.detail`), a node only gets kinds it advertised, and null
+  fields are no longer sent, so a v0.2 node sees exactly the ping frames it did before.
+- **tcp**: time to open a connection to a port from a short, administrator-editable allowlist
+  (`allowed_ports`), because a service that connects to any port is a port scanner. A refused
+  connection is an `error` sample that keeps its time (the host answered) and still is not counted
+  as a successful connection.
+- **http**: one request with DNS/connect/TLS/first-byte timings, status, the server header, redirects
+  and the TLS certificate (subject, issuer, validity, whether it verified). Only the path of a pasted
+  URL is kept, never its query string or credentials. Redirects are not followed unless asked for, and
+  at most `max_redirects` (default 5, 0 turns following off); every hop is checked on the node, but the
+  administrator's denylist applies to the first address only.
+- **traceroute**: one sample per hop. A hop that is not a public address (the node operator's router,
+  carrier-grade NAT) is reported as "a private hop" with no address, so a result never discloses
+  someone's LAN. A route is judged by whether the destination was reached, not by silent routers.
+- Everything a node sends beyond a round trip (`detail`) is parsed against a model for the task's
+  kind, size-limited, stripped of control characters, and dropped if it does not fit. The sample
+  itself is kept.
+- Location estimates use ping and TCP round trips only. New admin settings: `enabled_kinds`,
+  `allowed_ports`, `max_redirects`, `traceroute_max_hops`. Migration 0004 (`samples.detail`).
+- 25 new tests (planning, validation, each kind through a fake node, version gating, admin settings,
+  hostile details); the whole suite also passes on PostgreSQL 16.
+
 ### 2026-11-05: more than one backend process
 - Several backend processes (or hosts) can serve one deployment, with PostgreSQL as the only shared
   piece: instance heartbeats and node-connection presence in tables, the instance holding a node's

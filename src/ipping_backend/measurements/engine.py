@@ -52,12 +52,10 @@ from ..security.targets import (
     system_resolver,
 )
 from . import schemas
+from .plan import PlanError, plan_measurement, probe_cost, sample_limit
 from .schemas import TASK_ACTIVE, TASK_TERMINAL
 
 log = logging.getLogger(__name__)
-
-INTERVAL_MS = 1000
-TIMEOUT_MS = 2000
 
 
 class MeasurementError(Exception):
@@ -90,12 +88,15 @@ class Tx:
         self.events.append({"seq": seq, "type": type_, "data": data})
 
 
-def _sample_out(sample: Sample) -> schemas.SampleOut:
+def _sample_out(sample: Sample, kind: str = "ping") -> schemas.SampleOut:
+    detail = proto.parse_detail(kind, sample.detail)
     return schemas.SampleOut(
         seq=sample.seq,
         status=sample.status,
         rtt_ms=None if sample.rtt_us is None else round(sample.rtt_us / 1000, 3),
         error_code=sample.error_code,
+        http=detail if isinstance(detail, proto.HttpDetail) else None,
+        hop=detail if isinstance(detail, proto.HopDetail) else None,
     )
 
 
@@ -176,13 +177,15 @@ class MeasurementEngine:
             query = query.where(MeasurementTask.node_id == node_id)
         return list((await tx.session.execute(query)).scalars())
 
-    async def _samples(self, session: AsyncSession, task_id: str) -> list[schemas.SampleOut]:
+    async def _samples(
+        self, session: AsyncSession, task_id: str, kind: str
+    ) -> list[schemas.SampleOut]:
         rows = (
             await session.execute(
                 select(Sample).where(Sample.task_id == task_id).order_by(Sample.seq)
             )
         ).scalars()
-        return [_sample_out(s) for s in rows]
+        return [_sample_out(s, kind) for s in rows]
 
     # ----------------------------------------------------------------------------------------
     # Creating a measurement
@@ -217,20 +220,21 @@ class MeasurementEngine:
                 raise MeasurementError(exc.code, exc.message, 422) from exc
 
             dns_mode = "fixed" if parsed.ip is not None else request.dns_mode
-            count = request.count or settings.default_count
-            if count > settings.max_count:
-                raise MeasurementError(
-                    "count_too_high", f"At most {settings.max_count} echo requests per node.", 422
-                )
+            try:
+                plan = plan_measurement(request, parsed, settings)
+            except PlanError as exc:
+                raise MeasurementError(exc.code, exc.message, 422) from exc
+            kind = request.kind
+            each = probe_cost(kind, plan.options)
 
             nodes = await self._select_nodes(session, request, resolved.chosen_ip, dns_mode)
-            probes = len(nodes) * count
+            probes = len(nodes) * each
             if probes > settings.max_probes_per_measurement:
                 raise MeasurementError(
                     "probe_budget_exceeded",
-                    f"{len(nodes)} nodes x {count} echo requests = {probes} probes, above the "
+                    f"{len(nodes)} nodes x {each} probes = {probes} probes, above the "
                     f"limit of {settings.max_probes_per_measurement} per measurement. Select "
-                    "fewer nodes or fewer echo requests.",
+                    "fewer nodes or fewer probes.",
                     422,
                 )
             inflight = await self._inflight_probes(session)
@@ -240,9 +244,9 @@ class MeasurementEngine:
                 )
 
             now = utcnow()
-            deadline_s = max(settings.measurement_deadline_s, count * INTERVAL_MS // 1000 + 10)
             measurement = Measurement(
                 id=new_measurement_id(),
+                kind=kind,
                 input_kind=parsed.input_kind,
                 target_host=parsed.host,
                 target_ip=str(resolved.chosen_ip)
@@ -251,12 +255,12 @@ class MeasurementEngine:
                 resolved_ips=resolved.resolved_ips,
                 dns_mode=dns_mode,
                 family=family,
-                options={"count": count, "interval_ms": INTERVAL_MS, "timeout_ms": TIMEOUT_MS},
+                options=plan.options,
                 owner_session_id=owner.session_id,
                 owner_user_id=owner.user_id,
                 source_ip=source_ip,
                 created_at=now,
-                deadline_at=now + timedelta(seconds=deadline_s),
+                deadline_at=now + timedelta(seconds=plan.deadline_s),
             )
             session.add(measurement)
             tasks = [
@@ -298,7 +302,7 @@ class MeasurementEngine:
 
         log.info(
             "measurement created",
-            extra={"measurement": measurement_id, "nodes": len(tasks), "kind": "ping"},
+            extra={"measurement": measurement_id, "nodes": len(tasks), "kind": kind},
         )
         # Whichever instance holds each node's connection sends that node's task; the deadline reaper
         # settles anything that is never answered.
@@ -360,13 +364,13 @@ class MeasurementEngine:
             return 0
         option_rows = (
             await session.execute(
-                select(Measurement.id, Measurement.options).where(
+                select(Measurement.id, Measurement.kind, Measurement.options).where(
                     Measurement.id.in_([r[0] for r in rows])
                 )
             )
         ).all()
-        options: dict[str, dict[str, Any]] = {row[0]: row[1] for row in option_rows}
-        return sum(n * int(options[mid]["count"]) for mid, n in rows)
+        costs: dict[str, int] = {row[0]: probe_cost(row[1], row[2]) for row in option_rows}
+        return sum(n * costs[mid] for mid, n in rows)
 
     async def _select_nodes(
         self,
@@ -393,11 +397,21 @@ class MeasurementEngine:
             return caps.ipv4 or caps.ipv6
 
         eligible: list[Node] = []
+        online_approved = 0
         for node in approved:
             present = online.get(node.id)
-            if present is not None and capable(present.capabilities):
-                eligible.append(node)
+            if present is not None:
+                online_approved += 1
+                if capable(present.capabilities):
+                    eligible.append(node)
         eligible.sort(key=lambda n: (n.country or "~", n.city or "~", n.name))
+        if not eligible and online_approved and request.kind != "ping":
+            raise MeasurementError(
+                "kind_not_supported",
+                f"None of the {online_approved} online nodes can run a {request.kind} "
+                "measurement yet. Nodes need to be updated to a newer version.",
+                409,
+            )
 
         if request.node_ids is not None:
             wanted = set(request.node_ids)
@@ -431,15 +445,26 @@ class MeasurementEngine:
             await self._maybe_finalize(tx)
 
     def _task_frame(self, task: MeasurementTask, measurement: Measurement) -> proto.TaskFrame:
+        port = measurement.options.get("port") if measurement.kind in ("tcp", "http") else None
         if measurement.dns_mode == "fixed":
-            target = proto.TaskTarget(ip=measurement.target_ip, family=measurement.family)
+            # An http check connects to the pinned address but still presents the name it was given.
+            named = measurement.kind == "http" and measurement.target_host != measurement.target_ip
+            target = proto.TaskTarget(
+                ip=measurement.target_ip,
+                family=measurement.family,
+                port=port,
+                server_name=measurement.target_host if named else None,
+            )
         else:
-            target = proto.TaskTarget(hostname=measurement.target_host, family=measurement.family)
+            target = proto.TaskTarget(
+                hostname=measurement.target_host, family=measurement.family, port=port
+            )
         return proto.TaskFrame(
             task_id=task.id,
             attempt_id=task.attempt_id,
+            kind=measurement.kind,
             target=target,
-            options=proto.PingOptions.model_validate(measurement.options),
+            options=proto.TaskOptions.model_validate(measurement.options),
             expires_at=measurement.deadline_at,
         )
 
@@ -697,12 +722,12 @@ class MeasurementEngine:
         if task.status in TASK_TERMINAL:
             return False
         await tx.session.flush()
-        samples = await self._samples(tx.session, task.id)
+        samples = await self._samples(tx.session, task.id, tx.measurement.kind)
         task.status = status
         task.error_code = error_code
         task.error_message = error_message
         task.finished_at = utcnow()
-        summary = schemas.summarize(samples)
+        summary = schemas.summarize(samples, tx.measurement.kind)
         task.summary = summary.model_dump() if summary else None
         tx.emit("task.updated", task_state(task).model_dump(mode="json"))
         return True
@@ -782,14 +807,16 @@ class MeasurementEngine:
             task = await tx.session.get(MeasurementTask, frame.task_id)
             if task is None or task.status not in TASK_ACTIVE:
                 return
-            if frame.seq >= int(tx.measurement.options["count"]):
+            if frame.seq >= sample_limit(tx.measurement.kind, tx.measurement.options):
                 return
             exists = await tx.session.scalar(
                 select(Sample.id).where(Sample.task_id == task.id, Sample.seq == frame.seq)
             )
             if exists is not None:
                 return  # retransmission
-            rtt_us = frame.rtt_us if frame.status == "ok" else None
+            # A refused connection still took a measurable time to be refused, so an error sample
+            # may carry one; a timeout never does.
+            rtt_us = frame.rtt_us if frame.status in ("ok", "error") else None
             if frame.status == "ok" and rtt_us is None:
                 return
             sample = Sample(
@@ -798,12 +825,13 @@ class MeasurementEngine:
                 status=frame.status,
                 rtt_us=rtt_us,
                 error_code=frame.error_code,
+                detail=_stored_detail(tx.measurement.kind, frame.detail),
             )
             tx.session.add(sample)
             if task.status in ("pending", "dispatched"):
                 task.status = "running"
                 tx.emit("task.updated", task_state(task).model_dump(mode="json"))
-            data = _sample_out(sample).model_dump(mode="json")
+            data = _sample_out(sample, tx.measurement.kind).model_dump(mode="json")
             data["task_id"] = task.id
             tx.emit("sample", data)
 
@@ -929,14 +957,14 @@ class MeasurementEngine:
         )
         by_task: dict[str, list[schemas.SampleOut]] = {}
         for sample in sample_rows:
-            by_task.setdefault(sample.task_id, []).append(_sample_out(sample))
+            by_task.setdefault(sample.task_id, []).append(_sample_out(sample, measurement.kind))
 
         task_outs: list[schemas.TaskOut] = []
         for task in tasks:
             state = task_state(task)
             samples = by_task.get(task.id, [])
             if state.summary is None and task.status in TASK_ACTIVE:
-                state.summary = schemas.summarize(samples)  # live running summary
+                state.summary = schemas.summarize(samples, measurement.kind)  # live summary
             task_outs.append(schemas.TaskOut(**state.model_dump(), samples=samples))
         task_outs.sort(key=lambda t: (t.node.country or "~", t.node.city or "~", t.node.name, t.id))
         return schemas.MeasurementOut(
@@ -951,7 +979,7 @@ class MeasurementEngine:
             ),
             dns_mode=measurement.dns_mode,
             family=measurement.family,
-            options=schemas.PingOptionsOut.model_validate(measurement.options),
+            options=schemas.MeasurementOptions.model_validate(measurement.options),
             shared=measurement.shared,
             created_at=measurement.created_at,
             deadline_at=measurement.deadline_at,
@@ -960,6 +988,23 @@ class MeasurementEngine:
             stats=schemas.compute_stats(list(task_outs)),
             tasks=task_outs,
         )
+
+
+def _stored_detail(kind: str, raw: dict[str, Any] | None) -> dict[str, Any] | None:
+    """What a node sent along with a sample, checked and cleaned before it is stored.
+
+    Anything that does not fit the model for the kind is dropped, and a traceroute hop that is not
+    a public address is reduced to "a private hop": a result never discloses someone's LAN.
+    """
+    detail = proto.parse_detail(kind, raw)
+    if detail is None:
+        return None
+    if isinstance(detail, proto.HopDetail):
+        address = _public_ip_or_none(detail.ip)
+        if detail.ip is not None and address is None:
+            detail.private = True
+        detail.ip = address
+    return detail.model_dump(mode="json", exclude_none=True)
 
 
 def _public_ip_or_none(value: str | None) -> str | None:

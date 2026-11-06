@@ -57,3 +57,19 @@ def test_task_needs_exactly_one_destination() -> None:
         protocol.TaskTarget(ip="8.8.8.8", hostname="example.com")
     with pytest.raises(ValueError):  # noqa: PT011
         protocol.TaskTarget()
+
+
+@pytest.mark.parametrize(
+    ("name", "kind"),
+    [("sample_http", "http"), ("sample_hop", "traceroute"), ("sample_hop_private", "traceroute")],
+)
+def test_detail_fixtures_fit_their_models(name: str, kind: str) -> None:
+    frame = json.loads((CONTRACTS / "fixtures" / "node-to-backend" / f"{name}.json").read_text())
+    assert protocol.parse_detail(kind, frame["detail"]) is not None
+
+
+@pytest.mark.parametrize("name", ["task_tcp", "task_http", "task_traceroute"])
+def test_task_fixtures_name_their_kind(name: str) -> None:
+    frame = json.loads((CONTRACTS / "fixtures" / "backend-to-node" / f"{name}.json").read_text())
+    parsed = protocol.backend_to_node.validate_python(frame)
+    assert isinstance(parsed, protocol.TaskFrame) and parsed.kind == name.removeprefix("task_")

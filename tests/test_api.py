@@ -55,10 +55,12 @@ def read_sse(response: Any) -> list[dict[str, Any]]:
     return events
 
 
-def connect(api: Api, credential: str, ipv6: bool = True) -> Any:
+def connect(
+    api: Api, credential: str, ipv6: bool = True, kinds: tuple[str, ...] = ("ping",)
+) -> Any:
     ws = api.client.websocket_connect("/api/v1/nodes/connect", headers=node_headers(credential))
     session = ws.__enter__()
-    session.send_text(hello(ipv6=ipv6))
+    session.send_text(hello(ipv6=ipv6, kinds=kinds))
     welcome = json.loads(session.receive_text())
     assert welcome["type"] == "welcome"
     return ws, session
@@ -226,7 +228,7 @@ def test_full_measurement_through_a_node(api: Api) -> None:
         assert [t["node"]["id"] for t in measurement["tasks"]] == [node_id]
 
         task = run_node(session, [10_000, None, 30_000, 20_000])
-        assert task["target"] == {"ip": "93.184.216.34", "hostname": None, "family": "auto"}
+        assert task["target"] == {"ip": "93.184.216.34", "family": "auto"}
         assert task["options"] == {"count": 4, "interval_ms": 1000, "timeout_ms": 2000}
 
         final = api.get(f"/api/v1/measurements/{measurement['id']}").json()
@@ -241,6 +243,7 @@ def test_full_measurement_through_a_node(api: Api) -> None:
             "median_ms": 20.0,
             "avg_ms": 20.0,
             "max_ms": 30.0,
+            "reached": None,
         }
         assert [s["status"] for s in done["samples"]] == ["ok", "timeout", "ok", "ok"]
         assert final["stats"]["nodes_responding"] == 1
@@ -494,7 +497,7 @@ def test_regional_dns_mode_sends_the_hostname_to_the_node(api: Api) -> None:
         ).json()
         assert measurement["target"]["ip"] is None and measurement["dns_mode"] == "regional"
         task = json.loads(session.receive_text())
-        assert task["target"] == {"ip": None, "hostname": "example.com", "family": "4"}
+        assert task["target"] == {"hostname": "example.com", "family": "4"}
         ids = {"task_id": task["task_id"], "attempt_id": task["attempt_id"]}
         session.send_text(
             json.dumps({"type": "sample", **ids, "seq": 0, "status": "ok", "rtt_us": 1000})

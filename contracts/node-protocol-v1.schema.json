@@ -61,35 +61,6 @@
         "title": "Limits",
         "type": "object"
       },
-      "PingOptions": {
-        "properties": {
-          "count": {
-            "maximum": 10,
-            "minimum": 1,
-            "title": "Count",
-            "type": "integer"
-          },
-          "interval_ms": {
-            "maximum": 5000,
-            "minimum": 200,
-            "title": "Interval Ms",
-            "type": "integer"
-          },
-          "timeout_ms": {
-            "maximum": 10000,
-            "minimum": 200,
-            "title": "Timeout Ms",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "count",
-          "interval_ms",
-          "timeout_ms"
-        ],
-        "title": "PingOptions",
-        "type": "object"
-      },
       "Pong": {
         "properties": {
           "type": {
@@ -114,13 +85,18 @@
             "type": "string"
           },
           "kind": {
-            "const": "ping",
             "default": "ping",
+            "enum": [
+              "ping",
+              "tcp",
+              "http",
+              "traceroute"
+            ],
             "title": "Kind",
             "type": "string"
           },
           "options": {
-            "$ref": "#/$defs/PingOptions"
+            "$ref": "#/$defs/TaskOptions"
           },
           "target": {
             "$ref": "#/$defs/TaskTarget"
@@ -146,8 +122,95 @@
         "title": "TaskFrame",
         "type": "object"
       },
+      "TaskOptions": {
+        "description": "Settings of a task. Which fields matter depends on the kind:\n\n* ping: count, interval_ms, timeout_ms\n* tcp: count, interval_ms, timeout_ms (a port is in the target)\n* http: scheme, path, timeout_ms, max_redirects (one request, so no count)\n* traceroute: max_hops, timeout_ms (per hop; three probes are sent to each hop)",
+        "properties": {
+          "count": {
+            "default": 1,
+            "maximum": 10,
+            "minimum": 1,
+            "title": "Count",
+            "type": "integer"
+          },
+          "interval_ms": {
+            "default": 1000,
+            "maximum": 5000,
+            "minimum": 200,
+            "title": "Interval Ms",
+            "type": "integer"
+          },
+          "max_hops": {
+            "anyOf": [
+              {
+                "maximum": 30,
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Max Hops"
+          },
+          "max_redirects": {
+            "anyOf": [
+              {
+                "maximum": 5,
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Max Redirects"
+          },
+          "path": {
+            "anyOf": [
+              {
+                "maxLength": 256,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Path"
+          },
+          "scheme": {
+            "anyOf": [
+              {
+                "enum": [
+                  "http",
+                  "https"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Scheme"
+          },
+          "timeout_ms": {
+            "maximum": 10000,
+            "minimum": 200,
+            "title": "Timeout Ms",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "timeout_ms"
+        ],
+        "title": "TaskOptions",
+        "type": "object"
+      },
       "TaskTarget": {
-        "description": "Exactly one of `ip` (probe this address) or `hostname` (resolve it on the node).",
+        "description": "Exactly one of `ip` (probe this address) or `hostname` (resolve it on the node).\n\n`port` is the destination of a tcp or http task. `server_name` is the name an http task\npresents (Host header, TLS server name) while connecting to a pinned `ip`.",
         "properties": {
           "family": {
             "default": "auto",
@@ -182,6 +245,33 @@
             ],
             "default": null,
             "title": "Ip"
+          },
+          "port": {
+            "anyOf": [
+              {
+                "maximum": 65535,
+                "minimum": 1,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Port"
+          },
+          "server_name": {
+            "anyOf": [
+              {
+                "maxLength": 253,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Server Name"
           }
         },
         "title": "TaskTarget",
@@ -268,6 +358,7 @@
   "node_to_backend": {
     "$defs": {
       "Capabilities": {
+        "description": "What this node can run. A kind the backend does not know is simply never used.",
         "properties": {
           "ipv4": {
             "default": true,
@@ -283,6 +374,7 @@
             "items": {
               "type": "string"
             },
+            "maxItems": 16,
             "title": "Kinds",
             "type": "array"
           }
@@ -337,11 +429,24 @@
         "type": "object"
       },
       "SampleFrame": {
-        "description": "One echo request: its round-trip time, or why there is none.",
+        "description": "One probe: its round-trip time, or why there is none.\n\nWhat a sample is depends on the task's kind: an echo request (ping), a connection attempt\n(tcp), one request (http) or one hop (traceroute). `detail` carries what only some kinds have;\nsee `HttpDetail` and `HopDetail`.",
         "properties": {
           "attempt_id": {
             "title": "Attempt Id",
             "type": "string"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Detail"
           },
           "error_code": {
             "anyOf": [

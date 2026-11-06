@@ -206,6 +206,9 @@ class Sample(Base):
     status: Mapped[str] = mapped_column(String(10))
     rtt_us: Mapped[int | None] = mapped_column(Integer, nullable=True)
     error_code: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    # What only some kinds have: an HTTP response's timings and certificate, a traceroute hop.
+    # Already validated against protocol.HttpDetail / HopDetail before it is stored.
+    detail: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     received_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
 
     __table_args__ = (UniqueConstraint("task_id", "seq", name="uq_samples_task_seq"),)

@@ -111,6 +111,12 @@ async def location_for(db: AsyncSession, measurement: Measurement) -> LocationEs
         return _unavailable(
             measurement, "pending", "The estimate is made once every node has finished."
         )
+    if measurement.kind not in ("ping", "tcp"):
+        return _unavailable(
+            measurement,
+            "unavailable",
+            "An estimate needs round-trip times to the target. Run a ping or TCP measurement.",
+        )
     if measurement.dns_mode != "fixed" or not measurement.target_ip:
         return _unavailable(
             measurement,
