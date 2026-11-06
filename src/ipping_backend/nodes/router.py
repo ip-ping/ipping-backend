@@ -61,6 +61,7 @@ class PublicNode(BaseModel):
     online: bool
     ipv4: bool
     ipv6: bool
+    kinds: list[str]
 
 
 @router.post("/enroll", response_model=EnrollResponse, status_code=201)
@@ -159,6 +160,7 @@ async def list_nodes(request: Request, db: Db) -> list[PublicNode]:
                 online=connection is not None,
                 ipv4=caps.ipv4,
                 ipv6=caps.ipv6,
+                kinds=caps.kinds,
             )
         )
     return result

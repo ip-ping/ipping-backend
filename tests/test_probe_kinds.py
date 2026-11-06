@@ -430,6 +430,22 @@ def test_only_nodes_that_advertise_a_kind_get_it(api: Api) -> None:
         ws.__exit__(None, None, None)
 
 
+def test_the_node_list_says_which_kinds_each_node_can_run(api: Api) -> None:
+    api.become_admin()
+    _, old = api.enroll_node("Old")
+    _, new = api.enroll_node("New")
+    ws_old, _ = connect(api, old)
+    ws_new, _ = connect(api, new, kinds=ALL_KINDS)
+    try:
+        kinds = {n["name"]: n["kinds"] for n in api.get("/api/v1/nodes").json()}
+        assert kinds == {"Old": ["ping"], "New": list(ALL_KINDS)}
+        admin = {n["name"]: n["kinds"] for n in api.get("/api/v1/admin/nodes").json()}
+        assert admin == kinds
+    finally:
+        ws_new.__exit__(None, None, None)
+        ws_old.__exit__(None, None, None)
+
+
 def test_kinds_and_ports_are_administered(api: Api) -> None:
     api.become_admin()
     _, credential = api.enroll_node()

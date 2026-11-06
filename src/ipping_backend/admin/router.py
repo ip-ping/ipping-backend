@@ -165,6 +165,7 @@ class AdminNode(BaseModel):
     remote_addr: str | None
     ipv4: bool | None
     ipv6: bool | None
+    kinds: list[str] | None
     created_at: datetime
     last_seen_at: datetime | None
 
@@ -211,6 +212,7 @@ def _admin_node(node: Node, online: dict[str, OnlineNode]) -> AdminNode:
         remote_addr=node.remote_addr,
         ipv4=caps.ipv4 if caps else None,
         ipv6=caps.ipv6 if caps else None,
+        kinds=caps.kinds if caps else None,
         created_at=node.created_at,
         last_seen_at=node.last_seen_at,
     )

@@ -26,7 +26,8 @@ Progress log for `ipping-backend`, newest first. Each entry is one small, tested
   itself is kept.
 - Location estimates use ping and TCP round trips only. New admin settings: `enabled_kinds`,
   `allowed_ports`, `max_redirects`, `traceroute_max_hops`. Migration 0004 (`samples.detail`).
-- 25 new tests (planning, validation, each kind through a fake node, version gating, admin settings,
+- The node lists (`GET /api/v1/nodes`, admin nodes) say which kinds each node can run, so a UI can tell "3 online, 2 can run HTTP".
+- 26 new tests (planning, validation, each kind through a fake node, version gating, admin settings,
   hostile details); the whole suite also passes on PostgreSQL 16.
 
 ### 2026-11-05: more than one backend process
