@@ -1,0 +1,55 @@
+model multilateration-4: 3360 estimates, 26 targets, set=test, 12s
+
+== all fleet sizes
+strength                 runs  ≤ 100 km  ≤ 300 km  ≤ 500 km  ≤1000 km    median      p90   floor
+strong                    409       78%      100%      100%      100%       8km    190km     7km
+moderate                  328       13%       77%       99%      100%     250km    356km     8km
+low                      1410        5%       30%       49%       75%     526km   1753km     7km
+insufficient_evidence    1213  (no location given)
+
+== fleets of 4
+strength                 runs  ≤ 100 km  ≤ 300 km  ≤ 500 km  ≤1000 km    median      p90   floor
+strong                     31       74%      100%      100%      100%       8km    197km     7km
+moderate                   34        6%       85%      100%      100%     257km    328km     9km
+low                       364        3%       26%       46%       71%     592km   1800km     8km
+insufficient_evidence     411  (no location given)
+
+== fleets of 8
+strength                 runs  ≤ 100 km  ≤ 300 km  ≤ 500 km  ≤1000 km    median      p90   floor
+strong                     72       82%      100%      100%      100%       7km    197km     7km
+moderate                   60       12%       80%       98%      100%     251km    334km     9km
+low                       376        3%       28%       49%       73%     514km   1832km     8km
+insufficient_evidence     332  (no location given)
+
+== fleets of 16
+strength                 runs  ≤ 100 km  ≤ 300 km  ≤ 500 km  ≤1000 km    median      p90   floor
+strong                    129       74%      100%      100%      100%       9km    197km     7km
+moderate                  100        6%       71%      100%      100%     251km    406km     8km
+low                       345        6%       32%       48%       75%     550km   1835km     7km
+insufficient_evidence     266  (no location given)
+
+== fleets of 32
+strength                 runs  ≤ 100 km  ≤ 300 km  ≤ 500 km  ≤1000 km    median      p90   floor
+strong                    177       79%      100%      100%      100%       8km    190km     7km
+moderate                  134       21%       79%       99%      100%     206km    350km     8km
+low                       325        7%       36%       53%       82%     467km   1282km     7km
+insufficient_evidence     204  (no location given)
+
+== by the closest node's round trip (estimated runs)
+nearest                  runs  ≤ 100 km  ≤ 300 km  ≤ 500 km  ≤1000 km    median      p90   floor
+  0-  5 ms                410       80%      100%      100%      100%       7km    184km     7km
+  5- 10 ms                428        8%       73%       98%      100%     250km    405km     8km
+ 10- 20 ms                709        5%       38%       62%       90%     391km   1006km     4km
+ 20- 40 ms                600        4%       17%       26%       54%     920km   2570km     8km
+no estimate              1213  (no location given)
+
+status of all runs: {'estimated': 2147, 'insufficient_evidence': 1213}
+every estimated run: median 293 km, p90 1422 km; median floor 7 km
+
+largest errors:
+     4435 km  Singapore, SG                fleet 16 low       nearest 38.7 ms
+     4287 km  Singapore, SG                fleet 16 low       nearest 32.7 ms
+     4279 km  Izmir, TR                    fleet 16 low       nearest 38.0 ms
+     3860 km  Singapore, SG                fleet 32 low       nearest 30.8 ms
+     3667 km  Lisbon, PT                   fleet  8 low       nearest 36.9 ms
+     3667 km  Lisbon, PT                   fleet  8 low       nearest 36.8 ms

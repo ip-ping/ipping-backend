@@ -15,12 +15,20 @@ both, in that order:
    internet path (a path is usually 1.2 to 3 times the fibre distance, plus about a millisecond; the
    factor that fits a place best is used, with a pull towards the typical 1.7), nearest nodes weighted
    most. Anything faster than light in fibre is penalised hard.
-3. **Honesty.** The result carries the evidence it was built from, a heuristic strength label (never a
-   percentage or a radius: those would need calibration against targets of known location), the other
-   plausible places, and warnings. "Insufficient evidence" is a normal outcome.
+3. **Honesty.** The result carries the evidence it was built from, a strength label, the other
+   plausible places, and warnings. The label is a rule of thumb, never a percentage or a radius for
+   *this* answer; what each label has meant in practice is measured against real targets (below).
+   "Insufficient evidence" is a normal outcome, and so is "inconclusive".
 
-The model has not been calibrated against real-world ground truth. It is checked against synthetic
-paths in the tests; `MODEL_VERSION` changes whenever the arithmetic does.
+Calibration
+-----------
+The constants marked "fitted" were fitted, and the labels and cut-offs checked, on real measurements:
+round trips between RIPE Atlas anchors, which have known positions (`calibration/`,
+`scripts/collect_atlas.py`, `scripts/evaluate_location.py`). Targets were split into a calibration
+half (constants tuned on it) and a held-out test half (only used to report); the numbers in the
+README are the test half's. The unit tests use synthetic paths for the arithmetic, and
+`tests/test_real_measurements.py` guards the real-data results. `MODEL_VERSION` changes whenever the
+arithmetic does.
 """
 
 from __future__ import annotations
@@ -31,23 +39,28 @@ from typing import Literal
 
 from .gazetteer import City, cities
 
-MODEL_VERSION = "multilateration-3"
+MODEL_VERSION = "multilateration-4"
 
 KM_PER_RTT_MS_HARD = (
     150.0  # c in vacuum: 299.8 km per ms one way = 150 km of distance per round-trip ms
 )
 KM_PER_RTT_MS_FIBRE = 100.0  # two thirds of c, light in glass
+# Two nodes whose distances to the target cannot both be right at this speed contradict each other.
+# Looser than glass (a few links are faster) but far tighter than light in vacuum: across ~4,000
+# pairs of real unicast measurements the worst pair never needed more than 100 km per round-trip ms,
+# while 96% of the fleets measuring anycast root servers did.
+CONSISTENCY_KM_PER_RTT_MS = 110.0
 INFLATION = 1.7  # typical path length over the straight line
 # Paths differ by region (a straight submarine cable, a long detour), so each candidate is scored
 # at the inflation that fits it best among these, with a mild pull back towards the typical value.
 INFLATIONS = (1.2, 1.45, 1.7, 2.0, 2.4, 3.0)
 INFLATION_PRIOR = 3.0
-BASE_MS = 1.0  # equipment and last-mile delay
+BASE_MS = 8.0  # fixed delay on a real path (last mile, switching, queues); fitted on real data
 TOLERANCE_KM = 60.0  # node coordinates are usually city-level; do not reject on that alone
 
 MAX_EVIDENCE_NODES = 12
 MIN_NODES = 3
-MAX_CLOSEST_RTT_MS = 100.0
+MAX_CLOSEST_RTT_MS = 40.0  # beyond this the answer is usually more than 1000 km off
 NEAR_EQUAL = 3.0  # score difference within which places count as fitting "about as well"
 STRONG_SPREAD_KM = 500.0
 MODERATE_SPREAD_KM = 1500.0
@@ -171,7 +184,7 @@ def estimate(
     for i, a in enumerate(evidence):
         for b in evidence[i + 1 :]:
             apart = haversine_km(a.latitude, a.longitude, b.latitude, b.longitude)
-            if apart > KM_PER_RTT_MS_HARD * (a.rtt_ms + b.rtt_ms) + 2 * TOLERANCE_KM:
+            if apart > CONSISTENCY_KM_PER_RTT_MS * (a.rtt_ms + b.rtt_ms) + 2 * TOLERANCE_KM:
                 result.status = "inconclusive"
                 result.summary = NO_SINGLE_LOCATION
                 result.warnings.append(
@@ -258,10 +271,10 @@ def estimate(
         and margin >= 6
     ):
         strength = "strong"
-    elif nearest.rtt_ms <= 40 and spread_km <= MODERATE_SPREAD_KM and margin >= 2:
+    elif nearest.rtt_ms <= 10 and spread_km <= MODERATE_SPREAD_KM and margin >= 2:
         strength = "moderate"
 
-    if nearest.rtt_ms > 40:
+    if nearest.rtt_ms > 20:
         result.warnings.append(
             f"The closest node measured {nearest.rtt_ms:.0f} ms, so the area is broad."
         )

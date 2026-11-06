@@ -4,6 +4,29 @@ Progress log for `ipping-backend`, newest first. Each entry is one small, tested
 
 ## Unreleased
 
+### 2026-11-06: the location model, checked against real measurements
+- Until now the estimator had only been checked on synthetic paths. `scripts/collect_atlas.py`
+  gathers public RIPE Atlas data: the round trip from ~1,000 anchors (known positions) to each of 56
+  anchors in 40 countries, and to seven anycast root servers; the snapshot is committed
+  (`calibration/`, 340 KiB). `scripts/evaluate_location.py` draws random fleets of 4 to 32 anchors, asks
+  the estimator where the target is and compares with the truth. Targets are split in two: constants were
+  tuned on one half, and the other half is only used to report.
+- Findings, model 3 on the held-out half: median error 658 km over all answers; `strong` within 100 km
+  72% of the time and within 300 km 99%; error grows steadily with the closest node's round trip (median 43 km
+  below 5 ms, 3,300 km above 80 ms), so answers from a far-away fleet were close to useless.
+- Changes (model 4): the fixed delay of a path is 8 ms, not 1 ms (the one change that mattered: it
+  fits real paths, and cut the error in every band); no answer when the closest node is over 40 ms
+  (was 100 ms); `moderate` needs a node within 10 ms (was 40); two nodes that contradict each other at
+  110 km per round-trip ms (was the speed of light in vacuum, 150) mean "inconclusive". The rest was
+  tried (tolerance, inflation range and prior, evidence size) and left alone.
+- Result on the held-out half: median error of answered runs 293 km (p90 1,420 km); `strong` 100%
+  within 300 km (p90 190 km), `moderate` 99% within 500 km, `low` 75% within 1,000 km; 36% of random
+  fleets get no answer. Anycast: 95% of 1,120 fleets measuring root servers are "inconclusive" (558 of
+  560 with 16+ nodes); 0 of 6,720 real unicast fleets were. Full tables and the caveats (data-centre
+  targets, an Europe/North-America-heavy pool, city-level coordinates) are in the README.
+- `tests/test_real_measurements.py` guards these numbers with margin. Estimates stored with model 3 are
+  recomputed on demand (the model version is part of the cache key).
+
 ### 2026-11-06: a task whose backend instance died is sent again
 - Before, a task claimed by an instance that then died was always `interrupted`: delivery was at most
   once. Now, if the node had not produced anything yet, the task goes back to `pending` as a **new

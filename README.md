@@ -115,18 +115,55 @@ method is built around what it can and cannot know:
    scored by how well the times fit an internet path, with the path-length factor (1.2 to 3 times the
    fibre distance) fitted per place. Nodes with unverified coordinates count for less.
 3. **Honest output.** The result lists its evidence, the other plausible regions, warnings, and a
-   heuristic strength (`low`, `moderate`, `strong`), never a percentage or an accuracy radius, which
-   would need calibration. "Insufficient evidence" (fewer than 3 nodes with known coordinates, or no
-   node closer than 100 ms) is a normal answer. It needs a measurement made with "same IP for every
-   node", so every node probed the same address.
+   strength label (`low`, `moderate`, `strong`), never a percentage or radius for *this* answer.
+   "Insufficient evidence" (fewer than 3 nodes with known coordinates, or no node closer than 40 ms)
+   and "inconclusive" are normal answers. It needs a measurement made with "same IP for every node",
+   so every node probed the same address.
 
-**How well does it work?** Only measured on synthetic paths so far (random targets, random fleets of
-4 to 32 nodes, path factors 1.2 to 2.8, jitter): across 399 trials every `strong` answer was within
-218 km and every `moderate` within 272 km; `low` answers had a median error of 352 km, 58% within 500 km
-and a worst case of 8,232 km. That says the arithmetic is sound and the labels mean something; it says
-nothing about real-world accuracy, which needs targets of known location (see the roadmap). Anycast
-addresses, CDN edges and VPN endpoints are located where they answer from, not where their operator or
-users are.
+**How well does it work?** Checked on real measurements, not only synthetic ones. The data
+(`calibration/`, collected by `scripts/collect_atlas.py`) is public [RIPE Atlas](https://atlas.ripe.net)
+data: the round trip measured from about 1,000 anchors (well-run hosts in data centres, positions
+known) to each of 56 anchors in 40 countries, plus pings to anycast root servers. A "fleet" is a
+random 4, 8, 16 or 32 of those anchors standing in for an ipping deployment; the estimator is asked
+where the target is and the answer is compared with the truth. Targets were split in two: constants
+were tuned on one half and the numbers below are the **other, untouched half** (28 anchors, 3,360
+fleets; `calibration/result-test-multilateration-4.txt`).
+
+| label | share of answers | within 100 km | within 300 km | within 500 km | within 1,000 km | median error | 9 in 10 within |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `strong` | 12% | 78% | 100% | 100% | 100% | 8 km | 190 km |
+| `moderate` | 10% | 13% | 77% | 99% | 100% | 250 km | 360 km |
+| `low` | 42% | 5% | 30% | 49% | 75% | 530 km | 1,750 km |
+| no answer (closest node over 40 ms) | 36% | | | | | | |
+
+What this says, and does not:
+
+* The error grows with how far the *closest* node is: median 7 km when a node is within 5 ms, 250 km
+  within 10 ms, 390 km within 20 ms, 920 km within 40 ms. Past 40 ms answers were usually more than
+  1,000 km off, so the estimator now declines to answer (it used to give a place anyway; those
+  answers had a median error above 2,000 km).
+* Before this calibration (model 3, same held-out half) the median error of all answers was 658 km
+  and `strong` was within 100 km only 72% of the time. Fitting the fixed delay of a real path (8 ms,
+  not 1 ms) cut the median error for a closest node 10 to 20 ms away from 658 to 391 km (5 to 10 ms:
+  326 to 250 km; 20 to 40 ms: 1,257 to 920 km). Withholding answers beyond 40 ms brings the median of
+  all answers to 293 km. Only the base delay, the evidence cut-off, the `moderate` rule and the
+  contradiction bound changed; the other constants were tried and left alone.
+* **Anycast is detected, not guessed.** Across 1,120 random fleets measuring seven anycast root
+  servers, 95% were reported as "inconclusive" (nodes that cannot all be close to one place); with 16
+  or more nodes it was 558 of 560. The rest were fleets with nodes close together, which see one
+  instance and cannot tell. Across 6,720 real unicast fleets (both halves) the same check never fired
+  falsely. (The contradiction bound, 110 km per round-trip millisecond, was chosen from the physics
+  and the calibration half; the held-out half then confirmed it.)
+* The 60 targets are anchors in data centres, mostly in well-connected places; a home connection, a
+  mobile network or a CDN edge may behave differently. The random fleets are drawn from an anchor
+  pool that is heavy in Europe and North America, and your own nodes will be spread differently: the
+  table says how the method behaves, not how your deployment will. Anchor coordinates are city-level.
+* The estimator can only name cities of 100,000 people or more, so a target in a small town is never
+  closer than the nearest such city (median 7 km here, but it can be far for remote targets).
+
+Anycast addresses, CDN edges and VPN endpoints are located where they answer from, not where their
+operator or users are. To redo this: `uv run python scripts/collect_atlas.py` (needs the network) and
+`uv run python scripts/evaluate_location.py --set test`.
 
 ## Security model
 
@@ -207,8 +244,9 @@ Small steps, each one committed and logged in [CHANGELOG.md](CHANGELOG.md).
 - [x] TCP, HTTP and traceroute: backend side (protocol, planning, validation, tests)
 - [ ] TCP, HTTP and traceroute: node side and frontend
 - [ ] DNS comparison across nodes
-- [x] Estimated network location: constraint-based, evidence listed, explicit "insufficient evidence" (checked on synthetic paths only)
-- [ ] Calibrate the location model against real targets of known location (and optionally GeoIP / ASN / geofeed evidence)
+- [x] Estimated network location: constraint-based, evidence listed, explicit "insufficient evidence"
+- [x] Calibrate the location model against real targets of known location (RIPE Atlas anchors; held-out half reported)
+- [ ] Optionally add GeoIP / ASN / geofeed evidence to the location estimate
 
 ## License
 

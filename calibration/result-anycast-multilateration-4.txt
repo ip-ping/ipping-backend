@@ -1,0 +1,33 @@
+model multilateration-4: anycast root servers, 40 random fleets per size and server
+
+target                 fleet  inconclusive insufficient  estimated   estimated as (strength)
+k.root-servers.net         4            34            1          5   moderate 2, strong 3
+k.root-servers.net         8            39            0          1   strong 1
+k.root-servers.net        16            40            0          0   
+k.root-servers.net        32            40            0          0   
+f.root-servers.net         4            38            0          2   moderate 1, strong 1
+f.root-servers.net         8            40            0          0   
+f.root-servers.net        16            40            0          0   
+f.root-servers.net        32            40            0          0   
+i.root-servers.net         4            33            0          7   moderate 3, strong 4
+i.root-servers.net         8            40            0          0   
+i.root-servers.net        16            40            0          0   
+i.root-servers.net        32            40            0          0   
+m.root-servers.net         4            26            0         14   low 11, moderate 3
+m.root-servers.net         8            32            0          8   low 6, moderate 2
+m.root-servers.net        16            40            0          0   
+m.root-servers.net        32            38            0          2   moderate 1, strong 1
+l.root-servers.net         4            30            0         10   low 3, moderate 2, strong 5
+l.root-servers.net         8            39            0          1   low 1
+l.root-servers.net        16            40            0          0   
+l.root-servers.net        32            40            0          0   
+e.root-servers.net         4            39            0          1   strong 1
+e.root-servers.net         8            40            0          0   
+e.root-servers.net        16            40            0          0   
+e.root-servers.net        32            40            0          0   
+j.root-servers.net         4            35            0          5   low 2, strong 3
+j.root-servers.net         8            40            0          0   
+j.root-servers.net        16            40            0          0   
+j.root-servers.net        32            40            0          0   
+
+all 1120 runs: estimated 56, inconclusive 1063, insufficient_evidence 1, strength:low 23, strength:moderate 14, strength:strong 19
