@@ -4,6 +4,12 @@ Progress log for `ipping-backend`, newest first. Each entry is one small, tested
 
 ## Unreleased
 
+## v0.3.0 (2026-11-06)
+
+TCP, HTTP and traceroute measurements; tasks sent again when a backend instance dies; a location model
+checked and fitted on real measurements. Database migrations 0004 and 0005 (run `ipping-backend migrate`).
+Nodes of any earlier version keep working for ping; they need v0.3.0 for the new kinds.
+
 ### 2026-11-06: the location model, checked against real measurements
 - Until now the estimator had only been checked on synthetic paths. `scripts/collect_atlas.py`
   gathers public RIPE Atlas data: the round trip from ~1,000 anchors (known positions) to each of 56
