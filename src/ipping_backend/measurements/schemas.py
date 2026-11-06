@@ -115,6 +115,10 @@ class TaskStateOut(BaseModel):
     id: str
     node: NodeInfo
     status: str = Field(description="pending, dispatched, running or a terminal status")
+    attempts: int = Field(
+        default=1,
+        description="Above 1 if the task was sent again because a backend instance died",
+    )
     error_code: str | None = None
     error_message: str | None = None
     tested_ip: str | None = None

@@ -91,6 +91,7 @@ def create_app(
             resolver,
             dispatch_poll_s=settings.dispatch_poll_s,
             reaper_interval_s=settings.reaper_interval_s,
+            pending_grace_s=settings.pending_grace_s,
         )
         cluster.on_command(engine.handle_command)
         app.state.settings = settings
@@ -118,6 +119,7 @@ def create_app(
             asyncio.create_task(engine.run_reaper(), name="reaper"),
         ]
         loops.append(asyncio.create_task(maintenance.loop(sessionmaker), name="maintenance"))
+        app.state.loops = loops  # tests stop these to simulate a process that is simply gone
         try:
             yield
         finally:

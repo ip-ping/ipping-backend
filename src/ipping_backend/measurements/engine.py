@@ -105,6 +105,7 @@ def task_state(task: MeasurementTask) -> schemas.TaskStateOut:
         id=task.id,
         node=schemas.NodeInfo.model_validate(task.node_info),
         status=task.status,
+        attempts=task.attempts or 1,
         error_code=task.error_code,
         error_message=task.error_message,
         tested_ip=task.tested_ip,
@@ -558,34 +559,71 @@ class MeasurementEngine:
             await self._maybe_finalize(tx)
 
     async def _interrupt_orphans(self, measurement_id: str, alive: set[str]) -> None:
-        """Tasks sent by an instance that has stopped can never be answered here: interrupt them."""
+        """Tasks held by an instance that has stopped can never be answered through it.
+
+        If the node had not produced anything yet, nothing is lost by sending the task again (a new
+        attempt, so a late frame from the old one is ignored) and it waits for its node to reconnect,
+        to whichever instance. Otherwise the partial results are kept and the task is interrupted.
+        Only a backend failure is retried: a node that drops out stays `node_disconnected`, because
+        hiding that would pass off a flaky node as a reliable one.
+        """
         async with self._tx(measurement_id) as tx:
             if tx.measurement.status != "running":
                 return
+            retries = (await load_settings(tx.session)).task_retries
             interrupted = False
             for task in await self._active_tasks(tx):
-                if task.owner_instance is not None and task.owner_instance not in alive:
-                    interrupted |= await self._finish_task(
-                        tx,
-                        task,
-                        "interrupted",
-                        "interrupted",
-                        proto.TASK_ERROR_CODES["interrupted"],
-                    )
+                if task.owner_instance is None or task.owner_instance in alive:
+                    continue
+                if task.attempts <= retries and not await self._has_samples(tx, task):
+                    self._requeue(tx, task)
+                    continue
+                interrupted |= await self._finish_task(
+                    tx,
+                    task,
+                    "interrupted",
+                    "interrupted",
+                    proto.TASK_ERROR_CODES["interrupted"],
+                )
             await tx.session.flush()
             if interrupted and not await self._active_tasks(tx):
                 await self._finalize(tx, "interrupted")
             else:
                 await self._maybe_finalize(tx)
 
+    async def _has_samples(self, tx: Tx, task: MeasurementTask) -> bool:
+        await tx.session.flush()
+        found = await tx.session.scalar(select(Sample.id).where(Sample.task_id == task.id).limit(1))
+        return found is not None
+
+    def _requeue(self, tx: Tx, task: MeasurementTask) -> None:
+        """Hand a task back to be sent again, as a new attempt."""
+        task.attempts += 1
+        task.attempt_id = new_id()
+        task.status = "pending"
+        task.owner_instance = None
+        task.dispatched_at = None
+        task.queued_at = utcnow()
+        tx.emit("task.updated", task_state(task).model_dump(mode="json"))
+        log.warning(
+            "task sent again after its instance died",
+            extra={"measurement": tx.measurement.id, "task": task.id, "attempt": task.attempts},
+        )
+
+        async def wake() -> None:
+            self.cluster.signal_tasks()
+
+        tx.after_commit.append(wake)
+
     async def _fail_stranded(self, measurement_id: str, online: set[str]) -> None:
         """Pending tasks whose node is gone and has not come back within the grace period."""
         async with self._tx(measurement_id) as tx:
             if tx.measurement.status != "running":
                 return
-            if utcnow() - tx.measurement.created_at < self._pending_grace:
-                return
             for task in await self._active_tasks(tx):
+                waiting_since = task.queued_at or tx.measurement.created_at
+                if utcnow() - waiting_since < self._pending_grace:
+                    continue
                 if task.status == "pending" and task.node_id not in online:
                     await self._finish_task(
                         tx,

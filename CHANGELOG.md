@@ -4,6 +4,25 @@ Progress log for `ipping-backend`, newest first. Each entry is one small, tested
 
 ## Unreleased
 
+### 2026-11-06: a task whose backend instance died is sent again
+- Before, a task claimed by an instance that then died was always `interrupted`: delivery was at most
+  once. Now, if the node had not produced anything yet, the task goes back to `pending` as a **new
+  attempt** (new `attempt_id`, so a late frame from the old one is ignored; `attempts` is exposed on
+  the task) and is sent to its node as soon as it reconnects, to whichever instance. If the node
+  already produced samples, starting over would throw them away, so the task is `interrupted` and the
+  partial results are kept as before. `task_retries` (default 1, 0 turns it off) limits it.
+- Only backend failures are retried. A node that drops out stays `node_disconnected`: retrying would
+  pass a flaky node off as a reliable one. A task that waits for a node that never returns still fails
+  after the grace period (`IPPING_PENDING_GRACE_S`, default 5 s), counted from when it was requeued.
+- After a restart the new process does the same for what the old one left (it used to close
+  everything as `interrupted`).
+- Real run: 3 worker processes and 6 real nodes; the worker holding 3 nodes was SIGKILLed while the
+  measurement (TCP to a port that drops packets, so no sample yet) was running. The measurement
+  settled in 13.6 s as `completed`, all 6 tasks with their 2 samples, the 3 that were on the dead
+  worker with `attempts` 2. (A ping that has already produced samples is interrupted, as designed.)
+- Tests: unstarted task retried and old frames ignored, partial results kept and interrupted, retries
+  off, retry limit, node that never returns (PostgreSQL), restart behaviour (SQLite). Migration 0005.
+
 ### 2026-11-06: TCP, HTTP and traceroute measurements (backend side)
 - `kind` on `POST /api/v1/measurements` now accepts `tcp`, `http` and `traceroute` besides `ping`.
   Protocol v1 stays v1: the changes are additive (`TaskTarget.port`/`server_name`, `TaskOptions`

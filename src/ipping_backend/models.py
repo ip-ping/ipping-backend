@@ -191,6 +191,11 @@ class MeasurementTask(Base):
     # that instance stops answering, its unfinished tasks are interrupted.
     owner_instance: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     dispatched_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    # How many times this task has been handed to a node. It goes up only when the backend instance
+    # that held the task died before the node had produced anything, so starting over loses nothing.
+    attempts: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+    # When the task last (re)started waiting for its node; None means "since the measurement began".
+    queued_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
 
     __table_args__ = (Index("ix_tasks_node_status", "node_id", "status"),)

@@ -78,10 +78,11 @@ bring up the backend together with the frontend, database and reverse proxy.
 | `IPPING_HOST` / `IPPING_PORT` | `127.0.0.1` / `8000` | Bind address |
 | `IPPING_WORKERS` | `1` | Backend processes (more than one needs PostgreSQL) |
 | `IPPING_INSTANCE_DEAD_AFTER_S` | `10` | How long without a heartbeat before an instance counts as dead |
+| `IPPING_PENDING_GRACE_S` | `5` | How long a task waits for a node that is not connected before it is given up on |
 | `FORWARDED_ALLOW_IPS` | `127.0.0.1` | Reverse proxies whose `X-Forwarded-*` headers are trusted |
 
 Limits that an operator may need to change while running (emergency stop, per-user and global
-probe budgets, target denylist, retention) live in the database and are edited through
+probe budgets, target denylist, retention, enabled kinds, allowed ports, task retries) live in the database and are edited through
 `PATCH /api/v1/admin/settings`.
 
 ## Kinds of measurement
@@ -153,8 +154,9 @@ measurement. How:
 * **The owner sends the work.** Creating a measurement only writes tasks. The instance holding a
   node's connection claims that node's pending tasks under the measurement's row lock (pending to
   dispatched, recording itself as owner) and then sends them.
-* **A reaper in every instance** closes measurements past their deadline, interrupts tasks whose
-  owner instance died, and fails tasks whose node never came back. Nothing depends on the instance
+* **A reaper in every instance** closes measurements past their deadline, settles tasks whose
+  owner instance died (sent again if the node had produced nothing, otherwise interrupted), and
+  fails tasks whose node never came back. Nothing depends on the instance
   that created a measurement still being alive.
 * **Notifications are hints.** `LISTEN/NOTIFY` wakes other instances (new tasks, new events, commands
   such as "close this socket" or "cancel this task"); every consumer also polls, so a lost
@@ -175,8 +177,10 @@ two completed, and all nodes reconnected). The two-instance behaviour is covered
 
 * Traceroute needs Linux on the node (it uses the kernel's ICMP error queue).
 * A TCP or HTTP check connects to a destination the user chose, from the node's address, on the allowed ports only. Nodes should not be on networks where that is unwelcome.
-* Task delivery is at most once per attempt: a task claimed by an instance that then dies is
-  interrupted, not retried on another node connection.
+* A task is sent again (once, `task_retries`) only when its backend instance died and the node had
+  produced nothing yet. Once a node has produced samples a crash means `interrupted` with the
+  partial results kept, because starting over would discard them. A node that drops is never
+  retried: it is reported as `node_disconnected`.
 
 ## Releases
 

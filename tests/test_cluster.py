@@ -64,6 +64,7 @@ def pair(settings: Settings) -> Iterator[Pair]:
             "instance_dead_after_s": 1.0,
             "reaper_interval_s": 0.2,
             "dispatch_poll_s": 0.2,
+            "pending_grace_s": 1.5,
         }
     )
     app_a = create_app(fast, resolver=fake_resolver, create_schema=True)
@@ -236,35 +237,184 @@ def test_a_node_that_reconnects_to_the_other_instance_replaces_its_old_connectio
         old.__exit__(None, None, None)
 
 
-def test_when_an_instance_dies_the_other_one_settles_what_it_was_doing(pair: Pair) -> None:
+def crash(pair: Pair) -> None:
+    """Instance A "crashes": it stops heartbeating without saying goodbye, as a killed process would."""
+
+    async def stop() -> None:
+        # Everything that makes A a living instance: its heartbeat, dispatcher and reaper.
+        for task in [*pair.app_a.state.cluster._tasks, *pair.app_a.state.loops]:
+            task.cancel()
+
+    pair.a.client.portal.call(stop)
+
+
+def settled(pair: Pair, measurement_id: str, timeout: float = 12.0) -> Any:
+    return wait_for(
+        lambda: (
+            (m := pair.b.get(f"/api/v1/measurements/{measurement_id}").json())["status"]
+            != "running"
+            and m
+        ),
+        timeout=timeout,
+    )
+
+
+def test_when_an_instance_dies_a_task_whose_node_never_comes_back_is_a_node_failure(
+    pair: Pair,
+) -> None:
     _, credential = pair.a.enroll_node()
     ws, session = connect(pair.a, credential)
     try:
         measurement = pair.b.post("/api/v1/measurements", {"target": "example.com"}).json()
         json.loads(session.receive_text())  # A sent the task; the node never answers
+        crash(pair)
 
-        # A "crashes": it stops heartbeating without saying goodbye, as a killed process would.
-        async def crash() -> None:
-            for task in pair.app_a.state.cluster._tasks:
-                task.cancel()
-
-        pair.a.client.portal.call(crash)
-
-        final = wait_for(
-            lambda: (
-                (m := pair.b.get(f"/api/v1/measurements/{measurement['id']}").json())["status"]
-                != "running"
-                and m
-            ),
-            timeout=10,
-        )
-        assert final["status"] == "interrupted"
-        assert final["tasks"][0]["status"] == "interrupted"
-        assert final["tasks"][0]["error_code"] == "interrupted"
+        # The task is sent again, but its node does not reconnect, so after the grace period it is
+        # the node that is blamed, not the target and not the backend.
+        final = settled(pair, measurement["id"])
+        assert final["tasks"][0]["status"] == "node_disconnected"
+        assert final["tasks"][0]["attempts"] == 2
 
         # And its node no longer counts as online, so nothing new is promised to it.
         refused = pair.b.post("/api/v1/measurements", {"target": "example.com"})
         assert refused.status_code == 409 and refused.json()["error"]["code"] == "no_eligible_nodes"
+    finally:
+        ws.__exit__(None, None, None)
+
+
+def test_a_task_the_node_had_not_started_is_sent_again_when_its_instance_dies(pair: Pair) -> None:
+    _, credential = pair.a.enroll_node()
+    first, first_session = connect(pair.a, credential)
+    try:
+        measurement = pair.b.post("/api/v1/measurements", {"target": "example.com"}).json()
+        original = json.loads(first_session.receive_text())
+        crash(pair)
+
+        # The node reconnects, to the instance that is still alive, and is given the task again.
+        second, second_session = connect(pair.b, credential)
+        try:
+            again = json.loads(second_session.receive_text())
+            assert again["type"] == "task" and again["task_id"] == original["task_id"]
+            assert again["attempt_id"] != original["attempt_id"], (
+                "a new attempt, so old frames lose"
+            )
+
+            # A late frame from the first attempt is ignored.
+            second_session.send_text(
+                json.dumps(
+                    {
+                        "type": "sample",
+                        "task_id": original["task_id"],
+                        "attempt_id": original["attempt_id"],
+                        "seq": 0,
+                        "status": "ok",
+                        "rtt_us": 1,
+                    }
+                )
+            )
+            barrier(second_session)
+            answer_frames = {"task_id": again["task_id"], "attempt_id": again["attempt_id"]}
+            for seq, rtt in enumerate([10_000, 20_000, 30_000, 40_000]):
+                second_session.send_text(
+                    json.dumps(
+                        {
+                            "type": "sample",
+                            **answer_frames,
+                            "seq": seq,
+                            "status": "ok",
+                            "rtt_us": rtt,
+                        }
+                    )
+                )
+            second_session.send_text(
+                json.dumps(
+                    {
+                        "type": "task_result",
+                        **answer_frames,
+                        "status": "completed",
+                        "tested_ip": again["target"]["ip"],
+                    }
+                )
+            )
+            barrier(second_session)
+
+            final = settled(pair, measurement["id"])
+            assert final["status"] == "completed"
+            task = final["tasks"][0]
+            assert task["status"] == "completed" and task["attempts"] == 2
+            assert [s["rtt_ms"] for s in task["samples"]] == [10.0, 20.0, 30.0, 40.0]
+            with pair.b.client.stream(
+                "GET", f"/api/v1/measurements/{measurement['id']}/events"
+            ) as response:
+                updates = [
+                    json.loads(e["data"])["status"]
+                    for e in read_sse(response)
+                    if e["event"] == "task.updated"
+                ]
+            assert "pending" in updates[1:], f"the retry should be visible: {updates}"
+        finally:
+            second.__exit__(None, None, None)
+    finally:
+        first.__exit__(None, None, None)
+
+
+def test_a_task_that_already_produced_results_is_interrupted_and_keeps_them(pair: Pair) -> None:
+    _, credential = pair.a.enroll_node()
+    ws, session = connect(pair.a, credential)
+    try:
+        measurement = pair.b.post("/api/v1/measurements", {"target": "example.com"}).json()
+        task = json.loads(session.receive_text())
+        frames = {"task_id": task["task_id"], "attempt_id": task["attempt_id"]}
+        for seq in range(2):
+            session.send_text(
+                json.dumps({"type": "sample", **frames, "seq": seq, "status": "ok", "rtt_us": 5000})
+            )
+        barrier(session)
+        crash(pair)
+
+        final = settled(pair, measurement["id"])
+        done = final["tasks"][0]
+        assert final["status"] == "interrupted" and done["status"] == "interrupted"
+        assert done["attempts"] == 1, "starting over would have thrown the two results away"
+        assert [s["status"] for s in done["samples"]] == ["ok", "ok"]
+    finally:
+        ws.__exit__(None, None, None)
+
+
+def test_retries_can_be_turned_off(pair: Pair) -> None:
+    assert pair.b.patch("/api/v1/admin/settings", {"task_retries": 0}).status_code == 200
+    _, credential = pair.a.enroll_node()
+    ws, session = connect(pair.a, credential)
+    try:
+        measurement = pair.b.post("/api/v1/measurements", {"target": "example.com"}).json()
+        json.loads(session.receive_text())
+        crash(pair)
+        final = settled(pair, measurement["id"])
+        assert final["status"] == "interrupted"
+        assert final["tasks"][0]["status"] == "interrupted" and final["tasks"][0]["attempts"] == 1
+    finally:
+        ws.__exit__(None, None, None)
+
+
+def test_a_task_is_not_sent_again_more_than_the_limit_allows(pair: Pair) -> None:
+    _, credential = pair.a.enroll_node()
+    ws, session = connect(pair.a, credential)
+    try:
+        measurement = pair.b.post("/api/v1/measurements", {"target": "example.com"}).json()
+        json.loads(session.receive_text())
+        task_id = measurement["tasks"][0]["id"]
+
+        async def already_retried() -> None:
+            async with pair.app_a.state.sessionmaker() as db:
+                task = await db.get(MeasurementTask, task_id)
+                assert task is not None
+                task.attempts = 2  # one retry has been used and the limit is one
+                await db.commit()
+
+        pair.a.client.portal.call(already_retried)
+        crash(pair)
+        final = settled(pair, measurement["id"])
+        assert final["tasks"][0]["status"] == "interrupted"
     finally:
         ws.__exit__(None, None, None)
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any
 
 import pytest
@@ -586,8 +587,11 @@ def test_duplicate_and_forged_frames_are_ignored(api: Api) -> None:
 # ---------------------------------------------------------------------------------------------
 
 
-def test_backend_restart_interrupts_running_measurements(settings: Any) -> None:
-    first = TestClient(create_app(settings, resolver=fake_resolver, create_schema=True))
+def test_after_a_backend_restart_unstarted_work_is_sent_again_and_unanswered_work_is_closed(
+    settings: Any,
+) -> None:
+    quick = settings.model_copy(update={"pending_grace_s": 0.5, "reaper_interval_s": 0.2})
+    first = TestClient(create_app(quick, resolver=fake_resolver, create_schema=True))
     with first:
         api = Api(first)
         api.become_admin()
@@ -598,13 +602,18 @@ def test_backend_restart_interrupts_running_measurements(settings: Any) -> None:
         cookies, csrf = dict(first.cookies), api.csrf
         ws.__exit__(None, None, None)
 
-    # Same database, new process: the old measurement must be closed out, not left "running".
+    # Same database, new process, and the node has not come back: nothing is left "running".
     second = TestClient(
-        create_app(settings, resolver=fake_resolver, create_schema=True), cookies=cookies
+        create_app(quick, resolver=fake_resolver, create_schema=True), cookies=cookies
     )
     with second:
-        final = second.get(f"/api/v1/measurements/{mid}", headers={"X-CSRF-Token": csrf}).json()
-    assert final["status"] == "interrupted"
+        final: dict[str, Any] = {}
+        for _ in range(60):
+            final = second.get(f"/api/v1/measurements/{mid}", headers={"X-CSRF-Token": csrf}).json()
+            if final["status"] != "running":
+                break
+            time.sleep(0.1)
+    assert final["status"] in ("completed", "interrupted")
     assert final["tasks"][0]["status"] in ("interrupted", "node_disconnected")
 
 

@@ -61,6 +61,9 @@ class RuntimeSettings(BaseModel):
     # Most redirects an http check may follow; 0 turns following off.
     max_redirects: int = Field(default=5, ge=0, le=5)
     traceroute_max_hops: int = Field(default=30, ge=5, le=30)
+    # How many times a task whose backend instance died is sent again (only if the node had not
+    # produced a result yet); 0 turns it off and such a task is reported as interrupted.
+    task_retries: int = Field(default=1, ge=0, le=3)
 
     validate_kinds = field_validator("enabled_kinds")(_check_kinds)
     validate_ports = field_validator("allowed_ports")(_check_ports)
@@ -85,6 +88,7 @@ class RuntimeSettingsUpdate(BaseModel):
     allowed_ports: list[int] | None = Field(default=None, max_length=200)
     max_redirects: int | None = Field(default=None, ge=0, le=5)
     traceroute_max_hops: int | None = Field(default=None, ge=5, le=30)
+    task_retries: int | None = Field(default=None, ge=0, le=3)
 
     validate_kinds = field_validator("enabled_kinds")(_check_kinds)
     validate_ports = field_validator("allowed_ports")(_check_ports)

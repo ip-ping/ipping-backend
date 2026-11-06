@@ -1731,6 +1731,13 @@
             "title": "Target Denylist",
             "type": "array"
           },
+          "task_retries": {
+            "default": 1,
+            "maximum": 3.0,
+            "minimum": 0.0,
+            "title": "Task Retries",
+            "type": "integer"
+          },
           "traceroute_max_hops": {
             "default": 30,
             "maximum": 30.0,
@@ -1943,6 +1950,19 @@
               }
             ],
             "title": "Target Denylist"
+          },
+          "task_retries": {
+            "anyOf": [
+              {
+                "maximum": 3.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Task Retries"
           },
           "traceroute_max_hops": {
             "anyOf": [
@@ -2277,6 +2297,12 @@
       },
       "TaskOut": {
         "properties": {
+          "attempts": {
+            "default": 1,
+            "description": "Above 1 if the task was sent again because a backend instance died",
+            "title": "Attempts",
+            "type": "integer"
+          },
           "error_code": {
             "anyOf": [
               {

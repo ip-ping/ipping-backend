@@ -43,6 +43,8 @@ class Settings(BaseSettings):
     instance_dead_after_s: float = 10.0
     reaper_interval_s: float = 1.0
     dispatch_poll_s: float = 1.0
+    # How long a task may wait for a node that is not connected before it is given up on.
+    pending_grace_s: float = 5.0
 
     @field_validator("database_url")
     @classmethod
