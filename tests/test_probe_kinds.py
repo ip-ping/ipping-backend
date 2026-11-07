@@ -88,6 +88,7 @@ def test_each_kind_has_its_own_options_and_cost() -> None:
     assert probe_cost("tcp", tcp.options) == 4
     assert probe_cost("http", http.options) == 2
     assert probe_cost("traceroute", route.options) == 30
+    assert route.options["count"] == 1
 
 
 @pytest.mark.parametrize(
@@ -98,7 +99,6 @@ def test_each_kind_has_its_own_options_and_cost() -> None:
         ("tcp", "example.com", {"port": 23}, "port_not_allowed"),
         ("http", "https://example.com:9200/", {}, "port_not_allowed"),
         ("http", "example.com", {"count": 3}, "invalid_option"),
-        ("traceroute", "example.com", {"count": 3}, "invalid_option"),
         ("ping", "example.com", {"follow_redirects": True}, "invalid_option"),
         ("ping", "example.com", {"port": 80}, "invalid_option"),
         ("traceroute", "example.com", {"port": 80}, "invalid_option"),
@@ -112,6 +112,27 @@ def test_plans_that_make_no_sense_are_refused(
     with pytest.raises(PlanError) as caught:
         _plan(kind, target, **extra)
     assert caught.value.code == code
+
+
+def test_a_traceroute_can_be_repeated_like_mtr() -> None:
+    from ipping_backend.measurements.plan import PlanError
+
+    once = _plan("traceroute", "example.com")
+    five = _plan("traceroute", "example.com", count=5)
+    assert five.options["count"] == 5 and five.options["interval_ms"] == 1000
+    assert five.options["max_hops"] == once.options["max_hops"]
+    # A hop still produces one sample, but four more rounds take about 4 x (interval + timeout).
+    assert sample_limit("traceroute", five.options) == 30
+    assert five.deadline_s >= once.deadline_s and five.deadline_s >= 30 + 4 * 2 + 15
+    # Every extra round adds one packet per hop, a third of what the first round counted for.
+    assert probe_cost("traceroute", once.options) == 30
+    assert probe_cost("traceroute", five.options) == 70
+    assert probe_cost("traceroute", _plan("traceroute", "example.com", count=2).options) == 40
+
+    request = CreateMeasurementRequest(target="example.com", kind="traceroute", count=6)
+    with pytest.raises(PlanError) as caught:
+        plan_measurement(request, parse_target("example.com"), RuntimeSettings(max_count=4))
+    assert caught.value.code == "count_too_high"
 
 
 def test_disabled_kinds_are_refused() -> None:
@@ -171,6 +192,21 @@ def test_hop_and_http_details_are_bounded_and_cleaned() -> None:
     assert protocol.parse_detail("ping", {"status_code": 200}) is None
     detail = protocol.parse_detail("http", {"status_code": 200, "server": "ngi\x1b[31mnx\n"})
     assert isinstance(detail, protocol.HttpDetail) and detail.server == "ngi?[31mnx?"
+
+
+def test_a_repeated_hop_says_how_many_probes_it_got() -> None:
+    parsed = protocol.parse_detail(
+        "traceroute",
+        {"ttl": 3, "ip": "62.115.1.1", "rtts_us": [1000, 2000, 3000, 4000], "sent": 6},
+    )
+    assert isinstance(parsed, protocol.HopDetail) and parsed.sent == 6
+    # An older node sends no count: the hop is a plain one-round hop.
+    plain = protocol.parse_detail("traceroute", {"ttl": 3, "rtts_us": [1000]})
+    assert isinstance(plain, protocol.HopDetail) and plain.sent is None
+    # More answers than probes, no probes at all, or an absurd number of replies: dropped.
+    assert protocol.parse_detail("traceroute", {"ttl": 3, "rtts_us": [1, 2, 3], "sent": 2}) is None
+    assert protocol.parse_detail("traceroute", {"ttl": 3, "rtts_us": [], "sent": 0}) is None
+    assert protocol.parse_detail("traceroute", {"ttl": 3, "rtts_us": [1] * 33}) is None
 
 
 def test_route_summary_is_about_reaching_the_destination() -> None:
@@ -375,7 +411,14 @@ def test_traceroute_never_discloses_a_non_public_hop(api: Api) -> None:
         final = api.get(f"/api/v1/measurements/{measurement['id']}").json()
         done = final["tasks"][0]
         first, second, silent, third, last = (s["hop"] for s in done["samples"])
-        assert first == {"ttl": 1, "ip": None, "private": True, "rtts_us": [800], "reached": False}
+        assert first == {
+            "ttl": 1,
+            "ip": None,
+            "private": True,
+            "rtts_us": [800],
+            "reached": False,
+            "sent": None,
+        }
         assert second["ip"] is None and second["private"] is True  # carrier-grade NAT
         assert silent is None or silent["private"] is False
         assert (
@@ -384,6 +427,47 @@ def test_traceroute_never_discloses_a_non_public_hop(api: Api) -> None:
         assert last["ip"] == "93.184.216.34" and last["reached"] is True
         assert done["summary"]["reached"] is True and done["summary"]["median_ms"] == 12.0
         assert final["stats"]["nodes_responding"] == 1
+    finally:
+        ws.__exit__(None, None, None)
+
+
+def test_a_repeated_traceroute_is_asked_for_rounds_and_keeps_every_reply(api: Api) -> None:
+    api.become_admin()
+    _, credential = api.enroll_node()
+    ws, session = connect(api, credential, kinds=ALL_KINDS)
+    try:
+        measurement = _start(api, target="example.com", kind="traceroute", count=4)
+        assert measurement["options"]["count"] == 4
+        task = _task(session)
+        assert task["options"]["count"] == 4 and task["options"]["interval_ms"] == 1000
+        hops = [
+            {"ttl": 1, "ip": "203.0.113.9", "rtts_us": [900, 1000, 1100, 1200, 800, 950], "sent": 6},
+            {"ttl": 2, "ip": "62.115.1.1", "rtts_us": [9000, 9500, 12000], "sent": 6},
+            {"ttl": 3, "ip": "93.184.216.34", "rtts_us": [20_000] * 6, "sent": 6, "reached": True},
+        ]  # fmt: skip
+        for seq, detail in enumerate(hops):
+            _send(
+                session, task, type="sample", seq=seq, status="ok",
+                rtt_us=min(detail["rtts_us"]), detail=detail,
+            )  # fmt: skip
+        _complete(session, task)
+
+        done = api.get(f"/api/v1/measurements/{measurement['id']}").json()["tasks"][0]
+        second = done["samples"][1]["hop"]
+        assert second["sent"] == 6 and second["rtts_us"] == [9000, 9500, 12000]
+        assert done["summary"]["reached"] is True
+
+        # The plain-text view shows loss and spread instead of every reply.
+        from ipping_backend.measurements.render import render_text
+        from ipping_backend.measurements.schemas import MeasurementOut
+
+        text = render_text(
+            MeasurementOut.model_validate(
+                api.get(f"/api/v1/measurements/{measurement['id']}").json()
+            )
+        )
+        assert "50% loss" in text and "best/avg/worst = 9.0/10.2/12.0 ms" in text, text
+        assert "0% loss" in text
     finally:
         ws.__exit__(None, None, None)
 

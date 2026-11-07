@@ -192,14 +192,14 @@ interval (at least `min_watch_interval_s`, 60 s by default), and the rules of an
 | `ping` | an ICMP echo request | `count` 1 to 10 |
 | `tcp` | opening a TCP connection | needs a port (`host:port`, or `port`) from the allowed list; `count` 1 to 10; a refusal keeps its time but is not a success |
 | `http` | one request | scheme, port and path come from the URL (query strings are dropped); `follow_redirects` to follow up to 5; timings, status, certificate |
-| `traceroute` | one hop | up to 30 hops, three probes each; non-public hops are shown as private; Linux nodes only |
+| `traceroute` | one hop | up to 30 hops, three probes each; `count` 1 to 10 repeats the trace like `mtr` (one more probe per hop and round, a second apart) and a hop then carries how many probes it got (`sent`) and every reply; non-public hops are shown as private; Linux nodes only (rounds need node v0.4.1 or newer) |
 | `dns` | one question to one resolver | the target is a name (an IP address or an internal name is refused); `record_type` `A` (default), `AAAA`, `CNAME`, `MX`, `NS`, `TXT` or `SOA`; `resolver` `system` (default: each node's own resolvers, what people near it get) or `cloudflare`, `google`, `quad9` (that public resolver, asked from every node). The backend never resolves the name, so a name that does not exist can be checked |
 
 Each sample is one probe: for `ping` and `tcp` the round trip (a refused TCP connection is an `error`
 sample that keeps its time), for `http` the whole request with `detail` (`status_code`, DNS /
 connect / TLS / first-byte / total microseconds, server, redirects, `tls` certificate info), and for
 `traceroute` one hop (`ttl`, public `ip` or `private`, round trips, `reached`). The probe budget
-counts nodes times probes (an HTTP check counts 2, a traceroute counts its hop limit, a DNS question
+counts nodes times probes (an HTTP check counts 2, a traceroute counts its hop limit and a third of that again for every extra round, a DNS question
 counts 1). A `dns` sample carries `detail` too: the resolver (`system` or its public address), the
 response code (`NXDOMAIN` is an answer, not a failure), whether the answer was authoritative or came
 over TCP, and every record (name, type, TTL, text). From the node's own resolver, answers that are
@@ -396,6 +396,7 @@ Small steps, each one committed and logged in [CHANGELOG.md](CHANGELOG.md).
 - [x] API keys with quotas of their own, and a plain-text endpoint for `curl` (the command-line client is in the ipping repository)
 - [x] Scheduled checks (watches) with quiet alerts to a webhook or ntfy, safe with several instances
 - [x] DNS checks (record types, public or per-node resolvers, privacy rules; the comparison view is in the web interface)
+- [x] Traceroute in rounds like `mtr` (loss and spread per hop)
 - [ ] Public IPv6 verified end to end (needs a test host with IPv6 internet)
 - [x] Estimated network location: constraint-based, evidence listed, explicit "insufficient evidence"
 - [x] Calibrate the location model against real targets of known location (RIPE Atlas anchors; held-out half reported)

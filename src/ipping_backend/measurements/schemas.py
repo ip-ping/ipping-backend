@@ -62,7 +62,13 @@ class CreateMeasurementRequest(BaseModel):
         ),
     )
     count: int | None = Field(
-        default=None, ge=1, le=10, description="ping and tcp: probes per node"
+        default=None,
+        ge=1,
+        le=10,
+        description=(
+            "ping and tcp: probes per node. traceroute: how many times to trace the route "
+            "(default 1; more shows the loss at each hop, like mtr)"
+        ),
     )
     node_ids: list[str] | None = Field(
         default=None, max_length=1000, description="Limit to these nodes; omit for all eligible"

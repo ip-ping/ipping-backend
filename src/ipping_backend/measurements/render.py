@@ -49,6 +49,18 @@ def _line(kind: str, task: TaskOut, name: str) -> list[str]:
         lines = [head]
         for hop in hops:
             who = hop.ip or ("(private network)" if hop.private else "*")
+            if hop.sent is not None:
+                # A repeated trace: loss and the spread, not every reply.
+                got = len(hop.rtts_us)
+                loss = f"{(hop.sent - got) * 100 / hop.sent:g}% loss"
+                if hop.rtts_us:
+                    best, worst = min(hop.rtts_us) / 1000, max(hop.rtts_us) / 1000
+                    avg = sum(hop.rtts_us) / got / 1000
+                    spread = f"best/avg/worst = {ms(best)}/{ms(avg)}/{ms(worst)} ms"
+                else:
+                    spread = ""
+                lines.append(f"  {hop.ttl:>2}  {who:<40}  {loss:<10}  {spread}".rstrip())
+                continue
             times = "  ".join(ms(us / 1000) for us in hop.rtts_us)
             lines.append(f"  {hop.ttl:>2}  {who:<40}  {times}{' ms' if times else ''}")
         return lines

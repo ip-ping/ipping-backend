@@ -61,15 +61,23 @@ def test_task_needs_exactly_one_destination() -> None:
 
 @pytest.mark.parametrize(
     ("name", "kind"),
-    [("sample_http", "http"), ("sample_hop", "traceroute"), ("sample_hop_private", "traceroute")],
+    [
+        ("sample_http", "http"),
+        ("sample_hop", "traceroute"),
+        ("sample_hop_private", "traceroute"),
+        ("sample_hop_rounds", "traceroute"),
+    ],
 )
 def test_detail_fixtures_fit_their_models(name: str, kind: str) -> None:
     frame = json.loads((CONTRACTS / "fixtures" / "node-to-backend" / f"{name}.json").read_text())
     assert protocol.parse_detail(kind, frame["detail"]) is not None
 
 
-@pytest.mark.parametrize("name", ["task_tcp", "task_http", "task_traceroute"])
+@pytest.mark.parametrize(
+    "name", ["task_tcp", "task_http", "task_traceroute", "task_traceroute_rounds"]
+)
 def test_task_fixtures_name_their_kind(name: str) -> None:
     frame = json.loads((CONTRACTS / "fixtures" / "backend-to-node" / f"{name}.json").read_text())
     parsed = protocol.backend_to_node.validate_python(frame)
-    assert isinstance(parsed, protocol.TaskFrame) and parsed.kind == name.removeprefix("task_")
+    kind = name.removeprefix("task_").removesuffix("_rounds")
+    assert isinstance(parsed, protocol.TaskFrame) and parsed.kind == kind

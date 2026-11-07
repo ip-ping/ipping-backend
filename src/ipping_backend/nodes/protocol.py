@@ -158,7 +158,8 @@ class TaskOptions(_Frame):
     * ping: count, interval_ms, timeout_ms
     * tcp: count, interval_ms, timeout_ms (a port is in the target)
     * http: scheme, path, timeout_ms, max_redirects (one request, so no count)
-    * traceroute: max_hops, timeout_ms (per hop; three probes are sent to each hop)
+    * traceroute: max_hops, timeout_ms (per hop; three probes are sent to each hop), and, to repeat
+      the trace like mtr, count (rounds, default 1) and interval_ms (between rounds)
     * dns: record_type, resolver_ip (absent: the node's own resolvers), timeout_ms (one question,
       so no count; the name is the target's `hostname`, and the node never resolves it itself)
     """
@@ -342,13 +343,18 @@ class HopDetail(_Frame):
     `ip` is only ever a public address. A router inside the node operator's own network (or any
     other non-public address) is reported as `private` with no address, so a result never
     discloses the layout of someone's LAN.
+
+    A trace of one round sends three probes to a hop. When it is repeated (`count` above one),
+    `sent` says how many probes went to this hop and `rtts_us` has one entry for each that was
+    answered, so the hop's loss is `1 - len(rtts_us) / sent`.
     """
 
     ttl: int = Field(ge=1, le=64)
     ip: str | None = Field(default=None, max_length=45)
     private: bool = False
-    rtts_us: list[int] = Field(default_factory=list, max_length=3)
+    rtts_us: list[int] = Field(default_factory=list, max_length=32)
     reached: bool = False
+    sent: int | None = Field(default=None, ge=1, le=32)
 
     @field_validator("rtts_us")
     @classmethod
@@ -356,6 +362,12 @@ class HopDetail(_Frame):
         if any(v < 0 or v > 60_000_000 for v in value):
             raise ValueError("rtt out of range")
         return value
+
+    @model_validator(mode="after")
+    def _answers_fit_in_probes(self) -> HopDetail:
+        if self.sent is not None and len(self.rtts_us) > self.sent:
+            raise ValueError("more answers than probes sent")
+        return self
 
 
 _CONTROL = re.compile(r"[\x00-\x1f\x7f]")

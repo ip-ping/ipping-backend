@@ -2,6 +2,21 @@
 
 Progress log for `ipping-backend`, newest first. Each entry is one small, tested step.
 
+## Unreleased
+
+### 2026-11-07: traceroute in rounds, like mtr
+- A traceroute now takes `count` (1 to 10 rounds, default 1; the deployment's `max_count` still caps it). The
+  node traces once and then probes every hop it found again, a second apart, so a hop's loss and spread can
+  be seen. A hop is still one sample; its `detail` gains `sent` (probes sent to that hop) and holds every
+  reply in `rtts_us` (up to 32). A one-round trace is exactly as before and `sent` stays null.
+- `MeasurementOptions.count` is the number of rounds for a traceroute. The deadline grows by about two
+  seconds a round, and the probe budget counts a third of the hop limit for every extra round (one packet per
+  hop against the three of the first round). The plain-text report prints loss and best/avg/worst per hop.
+- Tests: planning, cost and deadline, the hop model's limits (more answers than probes, no probes), the
+  fixtures `task_traceroute_rounds` and `sample_hop_rounds` (also in the node repository), and a measurement
+  through a node with four rounds. Contracts regenerated.
+- Needs node v0.4.1 or newer to repeat; an older node ignores `count` for a traceroute and traces once.
+
 ## v0.4.1 (2026-11-07)
 
 Two defects found by installing the released v0.4.0 on a fresh Debian 13 and in a Docker stack, and using it.

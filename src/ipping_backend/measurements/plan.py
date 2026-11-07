@@ -59,13 +59,15 @@ def sample_limit(kind: str, options: dict[str, Any]) -> int:
 
 def probe_cost(kind: str, options: dict[str, Any]) -> int:
     """What one task of this kind counts for against the probe budget. A traceroute sends three
-    packets per hop but counts once per hop."""
+    packets per hop but counts once per hop; every extra round adds one packet per hop, a third of
+    a count."""
     if kind == "http":
         return HTTP_COST
     if kind == "dns":
         return 1
     if kind == "traceroute":
-        return int(options["max_hops"])
+        hops, rounds = int(options["max_hops"]), int(options["count"])
+        return -(-hops * (rounds + 2) // 3)
     return int(options["count"])
 
 
@@ -89,7 +91,7 @@ def plan_measurement(
     kind = request.kind
     if kind not in settings.enabled_kinds:
         raise PlanError("kind_disabled", f"{kind} measurements are turned off on this service.")
-    if kind in ("http", "traceroute", "dns") and request.count is not None:
+    if kind in ("http", "dns") and request.count is not None:
         raise PlanError("invalid_option", f"A {kind} measurement does not take a count.")
     if kind != "http" and request.follow_redirects:
         raise PlanError("invalid_option", "Only an http measurement can follow redirects.")
@@ -155,10 +157,15 @@ def plan_measurement(
         return Plan(options, None, max(deadline, DNS_TIMEOUT_MS // 1000 + 10))
 
     hops = settings.traceroute_max_hops
+    # `count` is the number of rounds: 1 traces once, more repeats the trace like mtr to show loss.
+    rounds = request.count or 1
+    if rounds > settings.max_count:
+        raise PlanError("count_too_high", f"At most {settings.max_count} rounds per node.")
     options = {
-        "count": 1,
+        "count": rounds,
         "interval_ms": INTERVAL_MS,
         "timeout_ms": HOP_TIMEOUT_MS,
         "max_hops": hops,
     }
-    return Plan(options, None, max(deadline, hops * HOP_TIMEOUT_MS // 1000 + 15))
+    slowest = hops * HOP_TIMEOUT_MS // 1000 + (rounds - 1) * (INTERVAL_MS + HOP_TIMEOUT_MS) // 1000
+    return Plan(options, None, max(deadline, slowest + 15))

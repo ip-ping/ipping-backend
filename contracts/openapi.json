@@ -596,7 +596,7 @@
                 "type": "null"
               }
             ],
-            "description": "ping and tcp: probes per node",
+            "description": "ping and tcp: probes per node. traceroute: how many times to trace the route (default 1; more shows the loss at each hop, like mtr)",
             "title": "Count"
           },
           "countries": {
@@ -1167,7 +1167,7 @@
         "type": "object"
       },
       "HopDetail": {
-        "description": "One traceroute hop: the router that answered at this TTL.\n\n`ip` is only ever a public address. A router inside the node operator's own network (or any\nother non-public address) is reported as `private` with no address, so a result never\ndiscloses the layout of someone's LAN.",
+        "description": "One traceroute hop: the router that answered at this TTL.\n\n`ip` is only ever a public address. A router inside the node operator's own network (or any\nother non-public address) is reported as `private` with no address, so a result never\ndiscloses the layout of someone's LAN.\n\nA trace of one round sends three probes to a hop. When it is repeated (`count` above one),\n`sent` says how many probes went to this hop and `rtts_us` has one entry for each that was\nanswered, so the hop's loss is `1 - len(rtts_us) / sent`.",
         "properties": {
           "ip": {
             "anyOf": [
@@ -1195,9 +1195,22 @@
             "items": {
               "type": "integer"
             },
-            "maxItems": 3,
+            "maxItems": 32,
             "title": "Rtts Us",
             "type": "array"
+          },
+          "sent": {
+            "anyOf": [
+              {
+                "maximum": 32.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sent"
           },
           "ttl": {
             "maximum": 64.0,
