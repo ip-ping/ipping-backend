@@ -95,3 +95,28 @@ class LocationEstimateOut(BaseModel):
     asn: AsnOut | None = Field(
         default=None, description="The network, if an ASN database is set up"
     )
+
+
+class HopPlaceOut(BaseModel):
+    """What a GeoIP database says about one router on a path. Routers are often registered at the
+    owner's headquarters, so the place is a hint to be checked against the round-trip time, never a
+    fact."""
+
+    asn: int | None = None
+    as_org: str | None = None
+    country: str | None = None
+    place: str | None = Field(default=None, description="City, or the country if no city is known")
+    latitude: float | None = None
+    longitude: float | None = None
+
+
+class PathOut(BaseModel):
+    """The networks and places of the routers a traceroute measurement found, by address."""
+
+    source: str | None = Field(default=None, description="Database name, when one is loaded")
+    attribution: str | None = None
+    city_database: bool = False
+    asn_database: bool = False
+    hops: dict[str, HopPlaceOut] = Field(
+        default_factory=dict, description="Keyed by the hop's public address"
+    )

@@ -18,7 +18,8 @@ from ..deps import (
     csrf_protect,
 )
 from ..errors import ApiError
-from ..geolocation.schemas import LocationEstimateOut
+from ..geolocation.path import path_for
+from ..geolocation.schemas import LocationEstimateOut, PathOut
 from ..geolocation.service import location_for
 from ..models import ApiKey, Measurement, MeasurementEvent, User, WebSession
 from . import schemas
@@ -129,6 +130,26 @@ async def estimated_location(
     """Where the target address appears to be, from the nodes' round-trip times (experimental)."""
     measurement = await _authorized(db, measurement_id, session, key)
     return await location_for(db, measurement, request.app.state.geoip)
+
+
+@router.get("/{measurement_id}/path", response_model=PathOut)
+async def traced_path(
+    measurement_id: str,
+    request: Request,
+    session: OptionalSession,
+    key: OptionalApiKey,
+    engine: Engine,
+    db: Db,
+) -> PathOut:
+    """The network (ASN) and the place a GeoIP database gives for each router a traceroute found.
+
+    Empty unless a database is loaded (`ipping-backend geoip-update`). A router's place is a hint:
+    check it against the round-trip time before believing it.
+    """
+    await _authorized(db, measurement_id, session, key)
+    result = await engine.load(db, measurement_id)
+    assert result is not None  # noqa: S101
+    return path_for(result, request.app.state.geoip)
 
 
 @router.post("/{measurement_id}/cancel", status_code=202)

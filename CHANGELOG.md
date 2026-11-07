@@ -4,6 +4,18 @@ Progress log for `ipping-backend`, newest first. Each entry is one small, tested
 
 ## Unreleased
 
+### 2026-11-07: the network and place of each router on a path
+- `GET /api/v1/measurements/{id}/path` returns, for every public router a traceroute found, its network (ASN
+  and organisation) and the place the GeoIP database gives, keyed by address, plus which databases are loaded
+  and their attribution. It is empty when no database is set up and for any kind but traceroute. Same access
+  as the measurement itself (owner, API key, administrator or a shared link).
+- Done on every request and not stored, like the GeoIP check of the location estimate: the databases are
+  replaced every month. Only addresses the result already shows are looked up, and only public ones.
+- A router's place is a hint, not a fact (routers are often registered at their owner's headquarters); the web
+  interface checks it against the round-trip time before drawing it.
+- 5 tests with generated databases: no database, both databases, a network without a city database, a ping,
+  and access (a stranger gets 404 until the owner shares). Contracts regenerated.
+
 ### 2026-11-07: traceroute in rounds, like mtr
 - A traceroute now takes `count` (1 to 10 rounds, default 1; the deployment's `max_count` still caps it). The
   node traces once and then probes every hop it found again, a second apart, so a hop's loss and spread can

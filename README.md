@@ -117,6 +117,7 @@ Interactive docs are at `/api/docs`; the machine-readable contract is `contracts
 | `GET /api/v1/measurements/{id}` | the measurement with its tasks, samples (`http` or `hop` details) and summaries |
 | `GET /api/v1/measurements/{id}/events` | live Server-Sent Events, resumable with `Last-Event-ID` |
 | `GET /api/v1/measurements/{id}/location` | the estimated location (ping and TCP) |
+| `GET /api/v1/measurements/{id}/path` | a traceroute's routers by address: network (ASN) and place from the GeoIP databases, if loaded (a hint to check against the round-trip time) |
 | `POST /api/v1/measurements/{id}/cancel`, `.../share` | cancel; make the link public |
 | `GET /api/v1/nodes` | the approved nodes, whether each is online, and the kinds it can run |
 | `POST /api/v1/nodes/enroll`, `WS /api/v1/nodes/connect` | what a node uses |
@@ -397,6 +398,7 @@ Small steps, each one committed and logged in [CHANGELOG.md](CHANGELOG.md).
 - [x] Scheduled checks (watches) with quiet alerts to a webhook or ntfy, safe with several instances
 - [x] DNS checks (record types, public or per-node resolvers, privacy rules; the comparison view is in the web interface)
 - [x] Traceroute in rounds like `mtr` (loss and spread per hop)
+- [x] The network and place of each router on a traced path (from the GeoIP databases; the route map is in the web interface)
 - [ ] Public IPv6 verified end to end (needs a test host with IPv6 internet)
 - [x] Estimated network location: constraint-based, evidence listed, explicit "insufficient evidence"
 - [x] Calibrate the location model against real targets of known location (RIPE Atlas anchors; held-out half reported)

@@ -1225,6 +1225,80 @@
         "title": "HopDetail",
         "type": "object"
       },
+      "HopPlaceOut": {
+        "description": "What a GeoIP database says about one router on a path. Routers are often registered at the\nowner's headquarters, so the place is a hint to be checked against the round-trip time, never a\nfact.",
+        "properties": {
+          "as_org": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "As Org"
+          },
+          "asn": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asn"
+          },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
+          "latitude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latitude"
+          },
+          "longitude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Longitude"
+          },
+          "place": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "City, or the country if no city is known",
+            "title": "Place"
+          }
+        },
+        "title": "HopPlaceOut",
+        "type": "object"
+      },
       "HttpDetail": {
         "description": "What one HTTP request found. Times are microseconds, measured on the node.\n\n`total_us` covers the whole exchange, redirects included. The phases (`dns_us`, `connect_us`,\n`tls_us`, `ttfb_us`) and `tls` belong to the final request, whose address is `final_host`.",
         "properties": {
@@ -1948,6 +2022,54 @@
           "name"
         ],
         "title": "NodeInfo",
+        "type": "object"
+      },
+      "PathOut": {
+        "description": "The networks and places of the routers a traceroute measurement found, by address.",
+        "properties": {
+          "asn_database": {
+            "default": false,
+            "title": "Asn Database",
+            "type": "boolean"
+          },
+          "attribution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attribution"
+          },
+          "city_database": {
+            "default": false,
+            "title": "City Database",
+            "type": "boolean"
+          },
+          "hops": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/HopPlaceOut"
+            },
+            "description": "Keyed by the hop's public address",
+            "title": "Hops",
+            "type": "object"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Database name, when one is loaded",
+            "title": "Source"
+          }
+        },
+        "title": "PathOut",
         "type": "object"
       },
       "PlaceOut": {
@@ -5507,6 +5629,49 @@
           }
         },
         "summary": "Estimated Location",
+        "tags": [
+          "measurements"
+        ]
+      }
+    },
+    "/api/v1/measurements/{measurement_id}/path": {
+      "get": {
+        "description": "The network (ASN) and the place a GeoIP database gives for each router a traceroute found.\n\nEmpty unless a database is loaded (`ipping-backend geoip-update`). A router's place is a hint:\ncheck it against the round-trip time before believing it.",
+        "operationId": "traced_path_api_v1_measurements__measurement_id__path_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "measurement_id",
+            "required": true,
+            "schema": {
+              "title": "Measurement Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PathOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Traced Path",
         "tags": [
           "measurements"
         ]
