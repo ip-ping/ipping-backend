@@ -1978,8 +1978,33 @@
         "title": "RuledOutOut",
         "type": "object"
       },
+      "RunNowOut": {
+        "properties": {
+          "measurement_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Measurement Id"
+          }
+        },
+        "required": [
+          "measurement_id"
+        ],
+        "title": "RunNowOut",
+        "type": "object"
+      },
       "RuntimeSettings": {
         "properties": {
+          "allow_private_webhooks": {
+            "default": false,
+            "title": "Allow Private Webhooks",
+            "type": "boolean"
+          },
           "allowed_ports": {
             "items": {
               "type": "integer"
@@ -2052,6 +2077,13 @@
             "title": "Max Redirects",
             "type": "integer"
           },
+          "max_watches": {
+            "default": 20,
+            "maximum": 500.0,
+            "minimum": 0.0,
+            "title": "Max Watches",
+            "type": "integer"
+          },
           "measurement_deadline_s": {
             "default": 30,
             "maximum": 300.0,
@@ -2070,6 +2102,13 @@
             "default": true,
             "title": "Measurements Enabled",
             "type": "boolean"
+          },
+          "min_watch_interval_s": {
+            "default": 60,
+            "maximum": 3600.0,
+            "minimum": 30.0,
+            "title": "Min Watch Interval S",
+            "type": "integer"
           },
           "sample_retention_days": {
             "default": 7,
@@ -2099,6 +2138,13 @@
             "minimum": 5.0,
             "title": "Traceroute Max Hops",
             "type": "integer"
+          },
+          "watch_history_days": {
+            "default": 30,
+            "maximum": 365.0,
+            "minimum": 1.0,
+            "title": "Watch History Days",
+            "type": "integer"
           }
         },
         "title": "RuntimeSettings",
@@ -2107,6 +2153,17 @@
       "RuntimeSettingsUpdate": {
         "description": "Every field optional: only the ones that are sent change.",
         "properties": {
+          "allow_private_webhooks": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allow Private Webhooks"
+          },
           "allowed_ports": {
             "anyOf": [
               {
@@ -2241,6 +2298,19 @@
             ],
             "title": "Max Redirects"
           },
+          "max_watches": {
+            "anyOf": [
+              {
+                "maximum": 500.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Watches"
+          },
           "measurement_deadline_s": {
             "anyOf": [
               {
@@ -2277,6 +2347,19 @@
               }
             ],
             "title": "Measurements Enabled"
+          },
+          "min_watch_interval_s": {
+            "anyOf": [
+              {
+                "maximum": 3600.0,
+                "minimum": 30.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Watch Interval S"
           },
           "sample_retention_days": {
             "anyOf": [
@@ -2331,6 +2414,19 @@
               }
             ],
             "title": "Traceroute Max Hops"
+          },
+          "watch_history_days": {
+            "anyOf": [
+              {
+                "maximum": 365.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Watch History Days"
           }
         },
         "title": "RuntimeSettingsUpdate",
@@ -2753,6 +2849,30 @@
         "title": "TaskOut",
         "type": "object"
       },
+      "TestAlertOut": {
+        "properties": {
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok"
+        ],
+        "title": "TestAlertOut",
+        "type": "object"
+      },
       "TlsInfo": {
         "properties": {
           "cipher": {
@@ -3094,6 +3214,712 @@
           "type"
         ],
         "title": "ValidationError",
+        "type": "object"
+      },
+      "WatchIn": {
+        "properties": {
+          "alert_after": {
+            "default": 2,
+            "description": "Bad runs in a row before an alert",
+            "maximum": 10.0,
+            "minimum": 1.0,
+            "title": "Alert After",
+            "type": "integer"
+          },
+          "alert_format": {
+            "default": "json",
+            "enum": [
+              "json",
+              "ntfy"
+            ],
+            "title": "Alert Format",
+            "type": "string"
+          },
+          "alert_url": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alert Url"
+          },
+          "count": {
+            "anyOf": [
+              {
+                "maximum": 10.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Count"
+          },
+          "dns_mode": {
+            "default": "fixed",
+            "enum": [
+              "fixed",
+              "regional"
+            ],
+            "title": "Dns Mode",
+            "type": "string"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "family": {
+            "default": "auto",
+            "enum": [
+              "auto",
+              "4",
+              "6"
+            ],
+            "title": "Family",
+            "type": "string"
+          },
+          "follow_redirects": {
+            "default": false,
+            "title": "Follow Redirects",
+            "type": "boolean"
+          },
+          "interval_s": {
+            "default": 300,
+            "description": "Seconds between runs",
+            "maximum": 86400.0,
+            "minimum": 30.0,
+            "title": "Interval S",
+            "type": "integer"
+          },
+          "kind": {
+            "enum": [
+              "ping",
+              "tcp",
+              "http",
+              "traceroute",
+              "dns"
+            ],
+            "title": "Kind",
+            "type": "string"
+          },
+          "min_ok_pct": {
+            "default": 80,
+            "description": "Bad when fewer than this share of nodes get a good answer",
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Min Ok Pct",
+            "type": "integer"
+          },
+          "name": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "node_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 1000,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Omit for all nodes",
+            "title": "Node Ids"
+          },
+          "port": {
+            "anyOf": [
+              {
+                "maximum": 65535.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Port"
+          },
+          "record_type": {
+            "anyOf": [
+              {
+                "enum": [
+                  "A",
+                  "AAAA",
+                  "CNAME",
+                  "MX",
+                  "NS",
+                  "TXT",
+                  "SOA"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Record Type"
+          },
+          "resolver": {
+            "anyOf": [
+              {
+                "enum": [
+                  "system",
+                  "cloudflare",
+                  "google",
+                  "quad9"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolver"
+          },
+          "target": {
+            "description": "Anything a measurement accepts",
+            "maxLength": 2048,
+            "minLength": 1,
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "kind",
+          "target"
+        ],
+        "title": "WatchIn",
+        "type": "object"
+      },
+      "WatchOut": {
+        "properties": {
+          "alert_after": {
+            "title": "Alert After",
+            "type": "integer"
+          },
+          "alert_format": {
+            "title": "Alert Format",
+            "type": "string"
+          },
+          "alert_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alert Url"
+          },
+          "alerting": {
+            "title": "Alerting",
+            "type": "boolean"
+          },
+          "bad_streak": {
+            "title": "Bad Streak",
+            "type": "integer"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "history": {
+            "default": [],
+            "description": "The latest runs, oldest first",
+            "items": {
+              "$ref": "#/components/schemas/WatchRunOut"
+            },
+            "title": "History",
+            "type": "array"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "interval_s": {
+            "title": "Interval S",
+            "type": "integer"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "last_alert_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Alert At"
+          },
+          "last_alert_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Alert Error"
+          },
+          "last_run_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Run At"
+          },
+          "last_status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "ok",
+                  "degraded",
+                  "down",
+                  "error"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Status"
+          },
+          "min_ok_pct": {
+            "title": "Min Ok Pct",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "next_run_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Run At"
+          },
+          "node_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Ids"
+          },
+          "options": {
+            "additionalProperties": true,
+            "title": "Options",
+            "type": "object"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "kind",
+          "target",
+          "options",
+          "node_ids",
+          "interval_s",
+          "min_ok_pct",
+          "alert_after",
+          "alert_url",
+          "alert_format",
+          "enabled",
+          "created_by",
+          "created_at",
+          "next_run_at",
+          "last_run_at",
+          "last_status",
+          "bad_streak",
+          "alerting",
+          "last_alert_at",
+          "last_alert_error"
+        ],
+        "title": "WatchOut",
+        "type": "object"
+      },
+      "WatchPatch": {
+        "description": "Every field optional: only the ones that are sent change. The kind cannot change.",
+        "properties": {
+          "alert_after": {
+            "anyOf": [
+              {
+                "maximum": 10.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alert After"
+          },
+          "alert_format": {
+            "anyOf": [
+              {
+                "enum": [
+                  "json",
+                  "ntfy"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alert Format"
+          },
+          "alert_url": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Empty string clears it",
+            "title": "Alert Url"
+          },
+          "all_nodes": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "true clears node_ids",
+            "title": "All Nodes"
+          },
+          "count": {
+            "anyOf": [
+              {
+                "maximum": 10.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Count"
+          },
+          "dns_mode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "fixed",
+                  "regional"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dns Mode"
+          },
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "family": {
+            "anyOf": [
+              {
+                "enum": [
+                  "auto",
+                  "4",
+                  "6"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Family"
+          },
+          "follow_redirects": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Follow Redirects"
+          },
+          "interval_s": {
+            "anyOf": [
+              {
+                "maximum": 86400.0,
+                "minimum": 30.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Interval S"
+          },
+          "min_ok_pct": {
+            "anyOf": [
+              {
+                "maximum": 100.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Ok Pct"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "node_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 1000,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Ids"
+          },
+          "port": {
+            "anyOf": [
+              {
+                "maximum": 65535.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Port"
+          },
+          "record_type": {
+            "anyOf": [
+              {
+                "enum": [
+                  "A",
+                  "AAAA",
+                  "CNAME",
+                  "MX",
+                  "NS",
+                  "TXT",
+                  "SOA"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Record Type"
+          },
+          "resolver": {
+            "anyOf": [
+              {
+                "enum": [
+                  "system",
+                  "cloudflare",
+                  "google",
+                  "quad9"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolver"
+          },
+          "target": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target"
+          }
+        },
+        "title": "WatchPatch",
+        "type": "object"
+      },
+      "WatchRunOut": {
+        "properties": {
+          "at": {
+            "format": "date-time",
+            "title": "At",
+            "type": "string"
+          },
+          "max_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Ms"
+          },
+          "measurement_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Measurement Id"
+          },
+          "median_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Median Ms"
+          },
+          "min_ms": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Ms"
+          },
+          "nodes_ok": {
+            "title": "Nodes Ok",
+            "type": "integer"
+          },
+          "nodes_total": {
+            "title": "Nodes Total",
+            "type": "integer"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "degraded",
+              "down",
+              "error"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "at",
+          "status",
+          "nodes_total",
+          "nodes_ok"
+        ],
+        "title": "WatchRunOut",
         "type": "object"
       }
     }
@@ -3609,6 +4435,337 @@
         "summary": "Service Status",
         "tags": [
           "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/watches": {
+      "get": {
+        "operationId": "list_watches_api_v1_admin_watches_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/WatchOut"
+                  },
+                  "title": "Response List Watches Api V1 Admin Watches Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Watches",
+        "tags": [
+          "watches"
+        ]
+      },
+      "post": {
+        "operationId": "create_watch_api_v1_admin_watches_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WatchIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatchOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Watch",
+        "tags": [
+          "watches"
+        ]
+      }
+    },
+    "/api/v1/admin/watches/{watch_id}": {
+      "delete": {
+        "operationId": "delete_watch_api_v1_admin_watches__watch_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "watch_id",
+            "required": true,
+            "schema": {
+              "title": "Watch Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Watch",
+        "tags": [
+          "watches"
+        ]
+      },
+      "get": {
+        "operationId": "read_watch_api_v1_admin_watches__watch_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "watch_id",
+            "required": true,
+            "schema": {
+              "title": "Watch Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatchOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Read Watch",
+        "tags": [
+          "watches"
+        ]
+      },
+      "patch": {
+        "operationId": "update_watch_api_v1_admin_watches__watch_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "watch_id",
+            "required": true,
+            "schema": {
+              "title": "Watch Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WatchPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WatchOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Watch",
+        "tags": [
+          "watches"
+        ]
+      }
+    },
+    "/api/v1/admin/watches/{watch_id}/run": {
+      "post": {
+        "operationId": "run_now_api_v1_admin_watches__watch_id__run_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "watch_id",
+            "required": true,
+            "schema": {
+              "title": "Watch Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunNowOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Run Now",
+        "tags": [
+          "watches"
+        ]
+      }
+    },
+    "/api/v1/admin/watches/{watch_id}/runs": {
+      "get": {
+        "operationId": "runs_api_v1_admin_watches__watch_id__runs_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "watch_id",
+            "required": true,
+            "schema": {
+              "title": "Watch Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 200,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/WatchRunOut"
+                  },
+                  "title": "Response Runs Api V1 Admin Watches  Watch Id  Runs Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Runs",
+        "tags": [
+          "watches"
+        ]
+      }
+    },
+    "/api/v1/admin/watches/{watch_id}/test-alert": {
+      "post": {
+        "operationId": "test_alert_api_v1_admin_watches__watch_id__test_alert_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "watch_id",
+            "required": true,
+            "schema": {
+              "title": "Watch Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TestAlertOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Test Alert",
+        "tags": [
+          "watches"
         ]
       }
     },

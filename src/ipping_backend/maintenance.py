@@ -16,6 +16,7 @@ from .models import (
     MeasurementEvent,
     MeasurementTask,
     Sample,
+    WatchRun,
     WebSession,
     utcnow,
 )
@@ -59,6 +60,13 @@ async def run_once(sessionmaker: async_sessionmaker[AsyncSession]) -> dict[str, 
                     Measurement.created_at
                     < now - timedelta(days=settings.measurement_retention_days),
                     Measurement.status != "running",
+                )
+            )
+        ).rowcount  # type: ignore[attr-defined]
+        removed["watch_runs"] = (
+            await db.execute(
+                delete(WatchRun).where(
+                    WatchRun.at < now - timedelta(days=settings.watch_history_days)
                 )
             )
         ).rowcount  # type: ignore[attr-defined]

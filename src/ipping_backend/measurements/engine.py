@@ -137,6 +137,8 @@ class MeasurementEngine:
         self._pending_grace = timedelta(seconds=pending_grace_s)
         self._locks: dict[str, asyncio.Lock] = {}
         self._background: set[asyncio.Task[None]] = set()
+        # Called (after commit) with the id of a finished measurement that a watch started.
+        self.on_watch_finished: Callable[[str], Awaitable[None]] | None = None
 
     # ----------------------------------------------------------------------------------------
     # Plumbing
@@ -199,6 +201,7 @@ class MeasurementEngine:
         request: schemas.CreateMeasurementRequest,
         owner: Owner,
         source_ip: str | None,
+        watch_id: str | None = None,
     ) -> str:
         async with self._sessionmaker() as session:
             settings = await load_settings(session)
@@ -277,6 +280,7 @@ class MeasurementEngine:
                 owner_session_id=owner.session_id,
                 owner_user_id=owner.user_id,
                 source_ip=source_ip,
+                watch_id=watch_id,
                 created_at=now,
                 deadline_at=now + timedelta(seconds=plan.deadline_s),
             )
@@ -814,6 +818,9 @@ class MeasurementEngine:
         tx.measurement.finished_at = utcnow()
         tx.emit("measurement.finished", {"status": status, "stats": stats.model_dump(mode="json")})
         log.info("measurement finished", extra={"measurement": tx.measurement.id, "status": status})
+        if tx.measurement.watch_id is not None and self.on_watch_finished is not None:
+            hook, measurement_id = self.on_watch_finished, tx.measurement.id
+            tx.after_commit.append(lambda: hook(measurement_id))
 
     # ----------------------------------------------------------------------------------------
     # Frames from nodes

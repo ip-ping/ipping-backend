@@ -156,6 +156,8 @@ class Measurement(Base):
     owner_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     source_ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
     shared: Mapped[bool] = mapped_column(Boolean, default=False)
+    # The scheduled check (watch) that started this measurement, if one did.
+    watch_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     event_seq: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, index=True)
     deadline_at: Mapped[datetime] = mapped_column(UTCDateTime)
@@ -292,3 +294,57 @@ class AuditEvent(Base):
     subject: Mapped[str | None] = mapped_column(String(64), nullable=True)
     data: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     source_ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
+
+
+class Watch(Base):
+    """A measurement that runs on a schedule, and tells someone when the target stops answering."""
+
+    __tablename__ = "watches"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    name: Mapped[str] = mapped_column(String(80))
+    kind: Mapped[str] = mapped_column(String(16))
+    # As entered; parsed again at every run, so a change to the blocklist applies to it too.
+    target: Mapped[str] = mapped_column(String(2048))
+    # What the request carried besides the target: port, count, record_type, resolver, dns_mode, ...
+    options: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
+    node_ids: Mapped[list[str] | None] = mapped_column(JSON, nullable=True)
+    interval_s: Mapped[int] = mapped_column(Integer)
+    # The check is "bad" when fewer than this share of the nodes that took part got a good answer.
+    min_ok_pct: Mapped[int] = mapped_column(Integer, default=80)
+    # Bad runs in a row before an alert is sent.
+    alert_after: Mapped[int] = mapped_column(Integer, default=2)
+    alert_url: Mapped[str | None] = mapped_column(String(2048), nullable=True)
+    alert_format: Mapped[str] = mapped_column(String(8), default="json")
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_by: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    next_run_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True, index=True)
+    last_run_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    # ok | degraded | down | error (the check itself could not run)
+    last_status: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    bad_streak: Mapped[int] = mapped_column(Integer, default=0)
+    # An alert was sent and the target has not recovered since.
+    alerting: Mapped[bool] = mapped_column(Boolean, default=False)
+    last_alert_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    last_alert_error: Mapped[str | None] = mapped_column(String(300), nullable=True)
+
+
+class WatchRun(Base):
+    """One run of a watch, kept in short form for the history strip; the measurement is separate."""
+
+    __tablename__ = "watch_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    watch_id: Mapped[str] = mapped_column(ForeignKey("watches.id", ondelete="CASCADE"), index=True)
+    at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, index=True)
+    # Not a foreign key: measurements are deleted by retention, runs by their own (longer) one.
+    measurement_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    status: Mapped[str] = mapped_column(String(10))
+    nodes_total: Mapped[int] = mapped_column(Integer, default=0)
+    nodes_ok: Mapped[int] = mapped_column(Integer, default=0)
+    # Of the nodes' own medians: the middle one, the fastest and the slowest.
+    median_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    min_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    max_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
+    note: Mapped[str | None] = mapped_column(String(200), nullable=True)

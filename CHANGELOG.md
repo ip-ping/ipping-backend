@@ -4,6 +4,26 @@ Progress log for `ipping-backend`, newest first. Each entry is one small, tested
 
 ## Unreleased
 
+### 2026-11-07: watches: scheduled checks and alerts
+- A **watch** runs a measurement on a schedule (every 60 s at the least) and alerts when the target stops
+  answering. A run is `ok`, `degraded` (fewer than `min_ok_pct` of the nodes got a good answer) or `down`, judged
+  by what the kind means by an answer: a ping reply, an opened connection, an HTTP status below 500, a DNS
+  answer with `NOERROR` and a record, a route that reached its destination. A check that cannot run (no node
+  online, a restart) is an `error` run and never an alert.
+- **Quiet alerts**: once after `alert_after` bad runs in a row, nothing while it stays bad, once when it is
+  back. To a JSON webhook or an ntfy topic. A failed delivery is recorded on the watch. The address is treated
+  like a target: resolved here, every address public unless `allow_private_webhooks` is on, no credentials in
+  it, the connection goes to the checked address (with the name for Host and TLS), no redirects, and it never
+  appears in the audit trail.
+- **Safe with several instances**: every instance runs the scheduler and a due watch is *claimed* with a
+  conditional update, so it runs once per interval; tested with two schedulers ticking at the same moment.
+- Migration `0007` (`watches`, `watch_runs`, `measurements.watch_id`); `/api/v1/admin/watches` (list, create,
+  change, delete, run now, test alert, runs); runtime settings `max_watches`, `min_watch_interval_s`,
+  `watch_history_days`, `allow_private_webhooks`; the retention sweep prunes old runs. `httpx` is now a
+  dependency. 39 new tests (judging per kind, the alert rules as a table, the formats, address safety including
+  that the connection is pinned to the checked address, the API, a full run with a fake node, the retention).
+  (One unrelated existing test failed once in about forty full runs and not again in forty more; watching it.)
+
 ### 2026-11-07: a GeoIP / ASN database as a second opinion
 - Optional. With `IPPING_GEOIP_DIR` (or explicit `IPPING_GEOIP_CITY_DB` / `IPPING_GEOIP_ASN_DB`) a result's
   location gains `asn` (the network of the target) and `geoip`: the place a MaxMind-format database names,

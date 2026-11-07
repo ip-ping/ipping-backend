@@ -121,7 +121,39 @@ Interactive docs are at `/api/docs`; the machine-readable contract is `contracts
 | `GET /api/v1/nodes` | the approved nodes, whether each is online, and the kinds it can run |
 | `POST /api/v1/nodes/enroll`, `WS /api/v1/nodes/connect` | what a node uses |
 | `/api/v1/admin/...` | nodes (approve, revoke, rotate credential), enrollment tokens, settings, audit, status |
+| `/api/v1/admin/watches/...` | scheduled checks and alerts: list, create, change, delete, `run`, `test-alert`, `runs` (see below) |
 | `GET /api/v1/health/live`, `/ready` | liveness and readiness |
+
+## Watches: scheduled checks and alerts
+
+A **watch** is a measurement that runs on a schedule and tells someone when the target stops answering.
+Administrators create them (`POST /api/v1/admin/watches`): a name, a kind and target exactly as for a
+measurement (a `port`, `record_type`, `resolver`, `count`, `node_ids` ... where the kind takes them), an
+interval (at least `min_watch_interval_s`, 60 s by default), and the rules of an alert.
+
+* **A run is judged by what the kind means by an answer.** A reply to a ping or a connection that opened; an
+  HTTP answer that is not a 5xx (a refused certificate sends no request, so it is not an answer); a DNS answer
+  with `NOERROR` and at least one record (a name that vanished is a failure); a route that reached its
+  destination. The run is `ok`, `degraded` (fewer than `min_ok_pct` of the nodes got a good answer, 80% by
+  default) or `down` (none did). If the check itself cannot run (no node online, the service restarted) the run
+  is an `error`, which says nothing about the target and never raises an alert.
+* **Alerts are quiet.** One alert after `alert_after` bad runs in a row (2 by default), none while it stays
+  bad, one when the target is good again. A POST to a webhook (JSON: event, watch, target, nodes, message) or
+  an [ntfy](https://ntfy.sh) topic (`alert_format: "ntfy"`). A delivery that fails is recorded on the watch
+  (`last_alert_error`), never lost silently; `POST .../test-alert` sends a test.
+* **The alert address is treated like a target.** The name is resolved on the server, every address must be
+  public (set `allow_private_webhooks` for a webhook on your own network, such as a self-hosted ntfy),
+  credentials in the address are refused, the connection goes to the address that was checked with the original
+  name for Host and TLS, and redirects are not followed. The audit trail never records the address, which may
+  hold a token.
+* **It works with several backend instances.** Every instance runs the scheduler; a due watch is claimed with a
+  conditional update of `next_run_at`, so it runs once per interval however many instances there are, and the
+  instance that finalises a measurement judges it. A watch's measurement is owned by nobody (only administrators
+  can open it) and each run is kept in short form (`watch_runs`: status, nodes ok, the median, the fastest and
+  slowest node) for `watch_history_days` (30 by default).
+* Limits are runtime settings: `max_watches` (20), `min_watch_interval_s`, `watch_history_days`,
+  `allow_private_webhooks`. A watch is validated when it is saved (a TCP watch without a port, an IP address
+  for DNS, a blocked name, a private alert address), so a mistake shows up then and not an hour later.
 
 ## Kinds of measurement
 
@@ -305,7 +337,7 @@ first because the application release pins it.
 
 | Release | Database head | Notes |
 |---|---|---|
-| v0.4.0 | `0006` | DNS checks; `dns` is enabled for deployments that had every kind on |
+| v0.4.0 | `0007` | DNS checks (`dns` is enabled for deployments that had every kind on); GeoIP / ASN cross-check; watches |
 | v0.3.0 | `0005` | TCP, HTTP and traceroute; tasks sent again when their instance dies; calibrated location model |
 | v0.2.0 | `0002` | estimated location; signed releases |
 | v0.1.0 | `0001` | first release |
@@ -330,6 +362,7 @@ Small steps, each one committed and logged in [CHANGELOG.md](CHANGELOG.md).
 - [ ] Per-session / per-IP quota tuning from real traffic
 - [x] TCP, HTTP and traceroute (protocol, planning, validation, tests; node and frontend shipped in v0.3.0)
 - [x] Tasks sent again when their backend instance dies before the node produced anything
+- [x] Scheduled checks (watches) with quiet alerts to a webhook or ntfy, safe with several instances
 - [x] DNS checks (record types, public or per-node resolvers, privacy rules; the comparison view is in the web interface)
 - [ ] Public IPv6 verified end to end (needs a test host with IPv6 internet)
 - [x] Estimated network location: constraint-based, evidence listed, explicit "insufficient evidence"

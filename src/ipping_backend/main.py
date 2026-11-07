@@ -27,6 +27,8 @@ from .models import AppSetting, Base, User
 from .nodes import router as nodes_router
 from .nodes.registry import NodeRegistry
 from .security.targets import Resolver, system_resolver
+from .watches import router as watches_router
+from .watches.service import WatchScheduler
 
 log = logging.getLogger(__name__)
 
@@ -101,6 +103,8 @@ def create_app(
         app.state.registry = registry
         app.state.cluster = cluster
         app.state.engine = engine
+        scheduler = WatchScheduler(sessionmaker, engine, resolver=resolver)
+        app.state.watches = scheduler
         app.state.geoip = GeoIp.from_settings(
             settings.geoip_dir, settings.geoip_city_db, settings.geoip_asn_db
         )
@@ -123,6 +127,7 @@ def create_app(
             asyncio.create_task(engine.run_reaper(), name="reaper"),
         ]
         loops.append(asyncio.create_task(maintenance.loop(sessionmaker), name="maintenance"))
+        loops.append(asyncio.create_task(scheduler.run(), name="watches"))
         app.state.loops = loops  # tests stop these to simulate a process that is simply gone
         try:
             yield
@@ -145,6 +150,7 @@ def create_app(
     install_error_handlers(app)
     app.include_router(admin_auth.router)
     app.include_router(admin_router.router)
+    app.include_router(watches_router.router)
     app.include_router(nodes_router.router)
     app.include_router(measurements_router.router)
 
