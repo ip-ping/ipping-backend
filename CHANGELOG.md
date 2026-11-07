@@ -22,7 +22,8 @@ Progress log for `ipping-backend`, newest first. Each entry is one small, tested
   `watch_history_days`, `allow_private_webhooks`; the retention sweep prunes old runs. `httpx` is now a
   dependency. 39 new tests (judging per kind, the alert rules as a table, the formats, address safety including
   that the connection is pinned to the checked address, the API, a full run with a fake node, the retention).
-  (One unrelated existing test failed once in about forty full runs and not again in forty more; watching it.)
+  (An unrelated existing test, `test_http_measurement_asks_for_the_name...`, failed once in the first full run after
+  this change and then passed in 8 more full runs and 15 repeats of its module: a timing flake, not reproduced.)
 
 ### 2026-11-07: a GeoIP / ASN database as a second opinion
 - Optional. With `IPPING_GEOIP_DIR` (or explicit `IPPING_GEOIP_CITY_DB` / `IPPING_GEOIP_ASN_DB`) a result's
