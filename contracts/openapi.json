@@ -389,12 +389,13 @@
           },
           "kind": {
             "default": "ping",
-            "description": "ping: ICMP echo. tcp: time to open a TCP connection to `port`. http: one request, with timings and the TLS certificate. traceroute: the routers on the way.",
+            "description": "ping: ICMP echo. tcp: time to open a TCP connection to `port`. http: one request, with timings and the TLS certificate. traceroute: the routers on the way. dns: ask each node's resolver (or a public one) about a name and compare the answers.",
             "enum": [
               "ping",
               "tcp",
               "http",
-              "traceroute"
+              "traceroute",
+              "dns"
             ],
             "title": "Kind",
             "type": "string"
@@ -428,6 +429,45 @@
             ],
             "description": "Destination port of a tcp check. For tcp it can also be given as host:port or in a URL. An http check takes its port from the URL.",
             "title": "Port"
+          },
+          "record_type": {
+            "anyOf": [
+              {
+                "enum": [
+                  "A",
+                  "AAAA",
+                  "CNAME",
+                  "MX",
+                  "NS",
+                  "TXT",
+                  "SOA"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "dns only: the record type to ask for (default A)",
+            "title": "Record Type"
+          },
+          "resolver": {
+            "anyOf": [
+              {
+                "enum": [
+                  "system",
+                  "cloudflare",
+                  "google",
+                  "quad9"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "dns only: system asks each node's own resolvers (what people near the node get); the others ask that public resolver from every node (default system)",
+            "title": "Resolver"
           },
           "target": {
             "description": "IP address, hostname or URL",
@@ -466,6 +506,113 @@
           }
         },
         "title": "CreateTokenRequest",
+        "type": "object"
+      },
+      "DnsAnswerRecord": {
+        "description": "One record of a DNS answer, as text.",
+        "properties": {
+          "data": {
+            "maxLength": 520,
+            "title": "Data",
+            "type": "string"
+          },
+          "name": {
+            "maxLength": 255,
+            "title": "Name",
+            "type": "string"
+          },
+          "ttl": {
+            "maximum": 4294967295.0,
+            "minimum": 0.0,
+            "title": "Ttl",
+            "type": "integer"
+          },
+          "type": {
+            "enum": [
+              "A",
+              "AAAA",
+              "CNAME",
+              "MX",
+              "NS",
+              "TXT",
+              "SOA"
+            ],
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "type",
+          "ttl",
+          "data"
+        ],
+        "title": "DnsAnswerRecord",
+        "type": "object"
+      },
+      "DnsDetail": {
+        "description": "What one DNS question found.\n\n`resolver` is `system` (the node's own resolvers; their addresses are never reported) or the\npublic resolver that was asked. A response code other than NOERROR (`NXDOMAIN` is the usual\none) is still an answer. `redacted` counts answers from the node's own resolver that were\nprivate addresses: they are left out, so a result never discloses someone's internal DNS.",
+        "properties": {
+          "answers": {
+            "items": {
+              "$ref": "#/components/schemas/DnsAnswerRecord"
+            },
+            "maxItems": 32,
+            "title": "Answers",
+            "type": "array"
+          },
+          "authoritative": {
+            "default": false,
+            "title": "Authoritative",
+            "type": "boolean"
+          },
+          "rcode": {
+            "maxLength": 16,
+            "title": "Rcode",
+            "type": "string"
+          },
+          "record_type": {
+            "enum": [
+              "A",
+              "AAAA",
+              "CNAME",
+              "MX",
+              "NS",
+              "TXT",
+              "SOA"
+            ],
+            "title": "Record Type",
+            "type": "string"
+          },
+          "redacted": {
+            "default": 0,
+            "maximum": 1000.0,
+            "minimum": 0.0,
+            "title": "Redacted",
+            "type": "integer"
+          },
+          "resolver": {
+            "maxLength": 45,
+            "title": "Resolver",
+            "type": "string"
+          },
+          "truncated": {
+            "default": false,
+            "title": "Truncated",
+            "type": "boolean"
+          },
+          "via_tcp": {
+            "default": false,
+            "title": "Via Tcp",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "resolver",
+          "record_type",
+          "rcode"
+        ],
+        "title": "DnsDetail",
         "type": "object"
       },
       "EnrollRequest": {
@@ -1081,6 +1228,43 @@
               }
             ],
             "title": "Port"
+          },
+          "record_type": {
+            "anyOf": [
+              {
+                "enum": [
+                  "A",
+                  "AAAA",
+                  "CNAME",
+                  "MX",
+                  "NS",
+                  "TXT",
+                  "SOA"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Record Type"
+          },
+          "resolver": {
+            "anyOf": [
+              {
+                "enum": [
+                  "system",
+                  "cloudflare",
+                  "google",
+                  "quad9"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolver"
           },
           "scheme": {
             "anyOf": [
@@ -1983,6 +2167,17 @@
       },
       "SampleOut": {
         "properties": {
+          "dns": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DnsDetail"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "dns: what the question found"
+          },
           "error_code": {
             "anyOf": [
               {

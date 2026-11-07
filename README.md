@@ -1,8 +1,8 @@
 # ipping-backend
 
 Python API for **ipping**, a self-hostable distributed network diagnostics service: a user enters an
-IP address, hostname or URL, every online node runs a **ping, TCP connect, HTTP request or
-traceroute** against it, and the results stream back live.
+IP address, hostname or URL, every online node runs a **ping, TCP connect, HTTP request,
+traceroute or DNS lookup** against it, and the results stream back live.
 
 This repository is the coordinator. It validates targets, schedules work onto nodes, stores and
 aggregates results, estimates where an address appears to be, and owns the contracts the other two
@@ -111,7 +111,7 @@ Interactive docs are at `/api/docs`; the machine-readable contract is `contracts
 | | |
 |---|---|
 | `GET /api/v1/session` | start a browser session and get its CSRF token (writes send it as `X-CSRF-Token`) |
-| `POST /api/v1/measurements` | start one: `{"target": "example.com:443", "kind": "tcp", "count": 4}`; `kind` is `ping`, `tcp`, `http` or `traceroute`; also `port`, `follow_redirects`, `dns_mode` (`fixed` / `regional`), `family`, `node_ids`, `countries` |
+| `POST /api/v1/measurements` | start one: `{"target": "example.com:443", "kind": "tcp", "count": 4}`; `kind` is `ping`, `tcp`, `http`, `traceroute` or `dns`; also `port`, `record_type` and `resolver` (dns), `follow_redirects`, `dns_mode` (`fixed` / `regional`), `family`, `node_ids`, `countries` |
 | `GET /api/v1/measurements/{id}` | the measurement with its tasks, samples (`http` or `hop` details) and summaries |
 | `GET /api/v1/measurements/{id}/events` | live Server-Sent Events, resumable with `Last-Event-ID` |
 | `GET /api/v1/measurements/{id}/location` | the estimated location (ping and TCP) |
@@ -129,12 +129,18 @@ Interactive docs are at `/api/docs`; the machine-readable contract is `contracts
 | `tcp` | opening a TCP connection | needs a port (`host:port`, or `port`) from the allowed list; `count` 1 to 10; a refusal keeps its time but is not a success |
 | `http` | one request | scheme, port and path come from the URL (query strings are dropped); `follow_redirects` to follow up to 5; timings, status, certificate |
 | `traceroute` | one hop | up to 30 hops, three probes each; non-public hops are shown as private; Linux nodes only |
+| `dns` | one question to one resolver | the target is a name (an IP address or an internal name is refused); `record_type` `A` (default), `AAAA`, `CNAME`, `MX`, `NS`, `TXT` or `SOA`; `resolver` `system` (default: each node's own resolvers, what people near it get) or `cloudflare`, `google`, `quad9` (that public resolver, asked from every node). The backend never resolves the name, so a name that does not exist can be checked |
 
 Each sample is one probe: for `ping` and `tcp` the round trip (a refused TCP connection is an `error`
 sample that keeps its time), for `http` the whole request with `detail` (`status_code`, DNS /
 connect / TLS / first-byte / total microseconds, server, redirects, `tls` certificate info), and for
 `traceroute` one hop (`ttl`, public `ip` or `private`, round trips, `reached`). The probe budget
-counts nodes times probes (an HTTP check counts 2, a traceroute counts its hop limit).
+counts nodes times probes (an HTTP check counts 2, a traceroute counts its hop limit, a DNS question
+counts 1). A `dns` sample carries `detail` too: the resolver (`system` or its public address), the
+response code (`NXDOMAIN` is an answer, not a failure), whether the answer was authoritative or came
+over TCP, and every record (name, type, TTL, text). From the node's own resolver, answers that are
+private addresses are left out and only counted (`redacted`): that resolver may know names that exist
+only inside the operator's network, and the backend removes them again whatever a node sends.
 
 Which kinds a node can run is part of its hello (`capabilities.kinds`); a measurement only goes to
 nodes that can run it, and asking for a kind none of the online nodes supports says so. Administrators
@@ -278,6 +284,7 @@ first because the application release pins it.
 
 | Release | Database head | Notes |
 |---|---|---|
+| v0.4.0 | `0006` | DNS checks; `dns` is enabled for deployments that had every kind on |
 | v0.3.0 | `0005` | TCP, HTTP and traceroute; tasks sent again when their instance dies; calibrated location model |
 | v0.2.0 | `0002` | estimated location; signed releases |
 | v0.1.0 | `0001` | first release |
@@ -302,7 +309,7 @@ Small steps, each one committed and logged in [CHANGELOG.md](CHANGELOG.md).
 - [ ] Per-session / per-IP quota tuning from real traffic
 - [x] TCP, HTTP and traceroute (protocol, planning, validation, tests; node and frontend shipped in v0.3.0)
 - [x] Tasks sent again when their backend instance dies before the node produced anything
-- [ ] DNS comparison across nodes
+- [x] DNS checks (record types, public or per-node resolvers, privacy rules; the comparison view is in the web interface)
 - [ ] Public IPv6 verified end to end (needs a test host with IPv6 internet)
 - [x] Estimated network location: constraint-based, evidence listed, explicit "insufficient evidence"
 - [x] Calibrate the location model against real targets of known location (RIPE Atlas anchors; held-out half reported)

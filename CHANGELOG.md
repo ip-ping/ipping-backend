@@ -4,6 +4,24 @@ Progress log for `ipping-backend`, newest first. Each entry is one small, tested
 
 ## Unreleased
 
+### 2026-11-07: DNS checks
+- A new kind, `dns`: every node asks a resolver about a name and the answers are compared. Options
+  `record_type` (`A` by default, `AAAA`, `CNAME`, `MX`, `NS`, `TXT`, `SOA`) and `resolver` (`system`, the
+  node's own resolvers and the default, or `cloudflare`, `google`, `quad9`: a public resolver asked
+  from every node, mapped to its address here so no other server can be named).
+- The backend never resolves the name, so a name that does not exist (the interesting case) can be
+  measured; an IP address, a single label and internal names (`.lan`, `.corp`, `.home.arpa` ...) are
+  refused, and the deployment blocklist applies to the name.
+- The sample `detail` is a new `DnsDetail`: resolver, record type, response code, authoritative, via TCP,
+  truncated, up to 32 records and a count of redacted answers. Text is stripped of control characters.
+  From a node's own resolver, answers that are private addresses are left out here too (a node already
+  does this; the backend does not rely on it), and a resolver that is not a public address is shown as
+  `unknown`. The size limit of a sample's detail is 8 KiB (was 4 KiB) so a full answer fits.
+- Migration `0006` adds `dns` to `enabled_kinds` for deployments that saved the list with all four
+  older kinds on; one whose administrator turned a kind off keeps its narrower choice.
+- Contracts regenerated, with example frames (`task_dns`, `sample_dns`) that the node parses too. 217 tests
+  pass on PostgreSQL (205 on SQLite), including the privacy filtering, planning rules and the migration.
+
 ### 2026-11-07: README brought up to date
 - The README now covers all four kinds in the intro and diagram, the additive protocol and the rule
   that everything from a node is untrusted, the complete configuration and runtime settings, an

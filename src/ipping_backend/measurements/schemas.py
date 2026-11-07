@@ -8,7 +8,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-from ..nodes.protocol import HopDetail, HttpDetail, ProbeKind
+from ..nodes.protocol import DnsDetail, DnsRecordType, HopDetail, HttpDetail, ProbeKind
 
 TASK_ACTIVE = ("pending", "dispatched", "running")
 TASK_TERMINAL = (
@@ -27,7 +27,8 @@ class CreateMeasurementRequest(BaseModel):
         default="ping",
         description=(
             "ping: ICMP echo. tcp: time to open a TCP connection to `port`. http: one request, "
-            "with timings and the TLS certificate. traceroute: the routers on the way."
+            "with timings and the TLS certificate. traceroute: the routers on the way. dns: ask "
+            "each node's resolver (or a public one) about a name and compare the answers."
         ),
     )
     port: int | None = Field(
@@ -50,6 +51,16 @@ class CreateMeasurementRequest(BaseModel):
         ),
     )
     family: Literal["auto", "4", "6"] = "auto"
+    record_type: DnsRecordType | None = Field(
+        default=None, description="dns only: the record type to ask for (default A)"
+    )
+    resolver: Literal["system", "cloudflare", "google", "quad9"] | None = Field(
+        default=None,
+        description=(
+            "dns only: system asks each node's own resolvers (what people near the node get); "
+            "the others ask that public resolver from every node (default system)"
+        ),
+    )
     count: int | None = Field(
         default=None, ge=1, le=10, description="ping and tcp: probes per node"
     )
@@ -109,6 +120,7 @@ class SampleOut(BaseModel):
     error_code: str | None = None
     http: HttpDetail | None = Field(default=None, description="http: what the request found")
     hop: HopDetail | None = Field(default=None, description="traceroute: the router at this hop")
+    dns: DnsDetail | None = Field(default=None, description="dns: what the question found")
 
 
 class TaskStateOut(BaseModel):
@@ -141,6 +153,8 @@ class MeasurementOptions(BaseModel):
     path: str | None = None
     max_redirects: int | None = None
     max_hops: int | None = None
+    record_type: DnsRecordType | None = None
+    resolver: Literal["system", "cloudflare", "google", "quad9"] | None = None
 
 
 class TargetOut(BaseModel):

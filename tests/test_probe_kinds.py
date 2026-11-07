@@ -159,7 +159,7 @@ def test_oversized_detail_is_dropped_but_the_sample_is_kept() -> None:
             "seq": 0,
             "status": "ok",
             "rtt_us": 5,
-            "detail": {"server": "x" * 6000},
+            "detail": {"server": "x" * 9000},
         }
     )
     assert isinstance(frame, protocol.SampleFrame) and frame.detail is None and frame.rtt_us == 5
@@ -452,7 +452,8 @@ def test_kinds_and_ports_are_administered(api: Api) -> None:
     ws, _ = connect(api, credential, kinds=ALL_KINDS)
     try:
         settings = api.get("/api/v1/admin/settings").json()
-        assert set(settings["enabled_kinds"]) == set(ALL_KINDS) and 443 in settings["allowed_ports"]
+        assert set(settings["enabled_kinds"]) == {*ALL_KINDS, "dns"}
+        assert 443 in settings["allowed_ports"]
 
         bad = api.patch("/api/v1/admin/settings", {"enabled_kinds": ["ping", "scan"]})
         assert bad.status_code == 422

@@ -44,6 +44,7 @@ from ..runtime_settings import RuntimeSettings, load_settings
 from ..security.ratelimit import allow
 from ..security.targets import (
     Denylist,
+    ResolvedTarget,
     Resolver,
     TargetError,
     address_is_public,
@@ -97,6 +98,7 @@ def _sample_out(sample: Sample, kind: str = "ping") -> schemas.SampleOut:
         error_code=sample.error_code,
         http=detail if isinstance(detail, proto.HttpDetail) else None,
         hop=detail if isinstance(detail, proto.HopDetail) else None,
+        dns=detail if isinstance(detail, proto.DnsDetail) else None,
     )
 
 
@@ -211,16 +213,31 @@ class MeasurementEngine:
             try:
                 parsed = parse_target(request.target)
                 family = request.family
-                resolved = await resolve_target(
-                    parsed,
-                    family=family,
-                    denylist=Denylist.from_entries(settings.target_denylist),
-                    resolver=self._resolver,
-                )
+                denylist = Denylist.from_entries(settings.target_denylist)
+                if request.kind == "dns":
+                    # A DNS check asks about the name; the backend never resolves it, so a name
+                    # that does not exist (the interesting case) is a valid target.
+                    if parsed.ip is not None:
+                        raise TargetError(
+                            "invalid_target", "A DNS check needs a name, not an IP address."
+                        )
+                    if denylist.blocks_host(parsed.host):
+                        raise TargetError(
+                            "blocked_by_policy",
+                            f"{parsed.host} is on this deployment's blocklist.",
+                        )
+                    resolved = ResolvedTarget(parsed)
+                else:
+                    resolved = await resolve_target(
+                        parsed, family=family, denylist=denylist, resolver=self._resolver
+                    )
             except TargetError as exc:
                 raise MeasurementError(exc.code, exc.message, 422) from exc
 
-            dns_mode = "fixed" if parsed.ip is not None else request.dns_mode
+            if request.kind == "dns":
+                dns_mode = "regional"  # every node asks for itself
+            else:
+                dns_mode = "fixed" if parsed.ip is not None else request.dns_mode
             try:
                 plan = plan_measurement(request, parsed, settings)
             except PlanError as exc:
@@ -1042,7 +1059,26 @@ def _stored_detail(kind: str, raw: dict[str, Any] | None) -> dict[str, Any] | No
         if detail.ip is not None and address is None:
             detail.private = True
         detail.ip = address
+    if isinstance(detail, proto.DnsDetail):
+        _clean_dns(detail)
     return detail.model_dump(mode="json", exclude_none=True)
+
+
+def _clean_dns(detail: proto.DnsDetail) -> None:
+    """The node already leaves private addresses out of an answer from its own resolver; this
+    makes sure, whatever a node sends. A public resolver's answers are public data and stay."""
+    if detail.resolver != "system":
+        # Only a public address can be a resolver that was named; anything else is not shown.
+        if _public_ip_or_none(detail.resolver) is None:
+            detail.resolver = "unknown"
+        return
+    kept = []
+    for record in detail.answers:
+        if record.type in ("A", "AAAA") and _public_ip_or_none(record.data) is None:
+            detail.redacted += 1
+        else:
+            kept.append(record)
+    detail.answers = kept
 
 
 def _public_ip_or_none(value: str | None) -> str | None:

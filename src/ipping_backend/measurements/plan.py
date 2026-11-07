@@ -18,6 +18,16 @@ PING_TIMEOUT_MS = 2000
 TCP_TIMEOUT_MS = 3000
 HTTP_TIMEOUT_MS = 10_000  # for the whole request, redirects included
 HOP_TIMEOUT_MS = 1000
+DNS_TIMEOUT_MS = 5000
+
+# The public resolvers a DNS check may ask, by name. The node asks the address on port 53; it refuses
+# anything that is not a public address, so this list is the whole set of outside servers a
+# measurement can send a query to.
+DNS_RESOLVERS: dict[str, str] = {
+    "cloudflare": "1.1.1.1",
+    "google": "8.8.8.8",
+    "quad9": "9.9.9.9",
+}
 
 # An HTTP check is a handful of packets and a TLS handshake: more than a ping, far less than a
 # traceroute. The unit is "one probe a node sends".
@@ -40,7 +50,7 @@ class Plan:
 
 def sample_limit(kind: str, options: dict[str, Any]) -> int:
     """The most samples one task of this kind can produce."""
-    if kind == "http":
+    if kind in ("http", "dns"):
         return 1
     if kind == "traceroute":
         return int(options["max_hops"])
@@ -52,6 +62,8 @@ def probe_cost(kind: str, options: dict[str, Any]) -> int:
     packets per hop but counts once per hop."""
     if kind == "http":
         return HTTP_COST
+    if kind == "dns":
+        return 1
     if kind == "traceroute":
         return int(options["max_hops"])
     return int(options["count"])
@@ -77,12 +89,16 @@ def plan_measurement(
     kind = request.kind
     if kind not in settings.enabled_kinds:
         raise PlanError("kind_disabled", f"{kind} measurements are turned off on this service.")
-    if kind in ("http", "traceroute") and request.count is not None:
+    if kind in ("http", "traceroute", "dns") and request.count is not None:
         raise PlanError("invalid_option", f"A {kind} measurement does not take a count.")
     if kind != "http" and request.follow_redirects:
         raise PlanError("invalid_option", "Only an http measurement can follow redirects.")
     if kind not in ("tcp", "http") and request.port is not None:
         raise PlanError("invalid_option", f"A {kind} measurement does not take a port.")
+    if kind != "dns" and (request.record_type is not None or request.resolver is not None):
+        raise PlanError(
+            "invalid_option", "Only a dns measurement takes a record type or a resolver."
+        )
 
     deadline = settings.measurement_deadline_s
     if kind in ("ping", "tcp"):
@@ -122,6 +138,21 @@ def plan_measurement(
             "max_redirects": redirects,
         }
         return Plan(options, port, max(deadline, HTTP_TIMEOUT_MS // 1000 + 10))
+
+    if kind == "dns":
+        if parsed.ip is not None:
+            raise PlanError("invalid_target", "A DNS check needs a name, not an IP address.")
+        resolver = request.resolver or "system"
+        options = {
+            "count": 1,
+            "interval_ms": INTERVAL_MS,
+            "timeout_ms": DNS_TIMEOUT_MS,
+            "record_type": request.record_type or "A",
+            "resolver": resolver,
+        }
+        if resolver != "system":
+            options["resolver_ip"] = DNS_RESOLVERS[resolver]
+        return Plan(options, None, max(deadline, DNS_TIMEOUT_MS // 1000 + 10))
 
     hops = settings.traceroute_max_hops
     options = {

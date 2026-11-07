@@ -90,7 +90,8 @@
               "ping",
               "tcp",
               "http",
-              "traceroute"
+              "traceroute",
+              "dns"
             ],
             "title": "Kind",
             "type": "string"
@@ -123,7 +124,7 @@
         "type": "object"
       },
       "TaskOptions": {
-        "description": "Settings of a task. Which fields matter depends on the kind:\n\n* ping: count, interval_ms, timeout_ms\n* tcp: count, interval_ms, timeout_ms (a port is in the target)\n* http: scheme, path, timeout_ms, max_redirects (one request, so no count)\n* traceroute: max_hops, timeout_ms (per hop; three probes are sent to each hop)",
+        "description": "Settings of a task. Which fields matter depends on the kind:\n\n* ping: count, interval_ms, timeout_ms\n* tcp: count, interval_ms, timeout_ms (a port is in the target)\n* http: scheme, path, timeout_ms, max_redirects (one request, so no count)\n* traceroute: max_hops, timeout_ms (per hop; three probes are sent to each hop)\n* dns: record_type, resolver_ip (absent: the node's own resolvers), timeout_ms (one question,\n  so no count; the name is the target's `hostname`, and the node never resolves it itself)",
         "properties": {
           "count": {
             "default": 1,
@@ -179,6 +180,40 @@
             ],
             "default": null,
             "title": "Path"
+          },
+          "record_type": {
+            "anyOf": [
+              {
+                "enum": [
+                  "A",
+                  "AAAA",
+                  "CNAME",
+                  "MX",
+                  "NS",
+                  "TXT",
+                  "SOA"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Record Type"
+          },
+          "resolver_ip": {
+            "anyOf": [
+              {
+                "maxLength": 45,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Resolver Ip"
           },
           "scheme": {
             "anyOf": [
@@ -429,7 +464,7 @@
         "type": "object"
       },
       "SampleFrame": {
-        "description": "One probe: its round-trip time, or why there is none.\n\nWhat a sample is depends on the task's kind: an echo request (ping), a connection attempt\n(tcp), one request (http) or one hop (traceroute). `detail` carries what only some kinds have;\nsee `HttpDetail` and `HopDetail`.",
+        "description": "One probe: its round-trip time, or why there is none.\n\nWhat a sample is depends on the task's kind: an echo request (ping), a connection attempt\n(tcp), one request (http), one hop (traceroute) or one DNS question (dns). `detail` carries what\nonly some kinds have; see `HttpDetail`, `HopDetail` and `DnsDetail`.",
         "properties": {
           "attempt_id": {
             "title": "Attempt Id",

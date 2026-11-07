@@ -23,10 +23,13 @@ SUPPORTED_PROTOCOL_VERSIONS = (1,)
 
 MAX_FRAME_BYTES = 64 * 1024
 # What a sample may carry besides its round trip. Bounded because it comes from a node.
-MAX_DETAIL_BYTES = 4096
+MAX_DETAIL_BYTES = 8192
 
-ProbeKind = Literal["ping", "tcp", "http", "traceroute"]
-PROBE_KINDS: tuple[str, ...] = ("ping", "tcp", "http", "traceroute")
+ProbeKind = Literal["ping", "tcp", "http", "traceroute", "dns"]
+PROBE_KINDS: tuple[str, ...] = ("ping", "tcp", "http", "traceroute", "dns")
+
+DnsRecordType = Literal["A", "AAAA", "CNAME", "MX", "NS", "TXT", "SOA"]
+DNS_RECORD_TYPES: tuple[str, ...] = ("A", "AAAA", "CNAME", "MX", "NS", "TXT", "SOA")
 
 
 class _Frame(BaseModel):
@@ -65,8 +68,8 @@ class SampleFrame(_Frame):
     """One probe: its round-trip time, or why there is none.
 
     What a sample is depends on the task's kind: an echo request (ping), a connection attempt
-    (tcp), one request (http) or one hop (traceroute). `detail` carries what only some kinds have;
-    see `HttpDetail` and `HopDetail`.
+    (tcp), one request (http), one hop (traceroute) or one DNS question (dns). `detail` carries what
+    only some kinds have; see `HttpDetail`, `HopDetail` and `DnsDetail`.
     """
 
     type: Literal["sample"] = "sample"
@@ -156,6 +159,8 @@ class TaskOptions(_Frame):
     * tcp: count, interval_ms, timeout_ms (a port is in the target)
     * http: scheme, path, timeout_ms, max_redirects (one request, so no count)
     * traceroute: max_hops, timeout_ms (per hop; three probes are sent to each hop)
+    * dns: record_type, resolver_ip (absent: the node's own resolvers), timeout_ms (one question,
+      so no count; the name is the target's `hostname`, and the node never resolves it itself)
     """
 
     count: int = Field(default=1, ge=1, le=10)
@@ -165,6 +170,8 @@ class TaskOptions(_Frame):
     path: str | None = Field(default=None, max_length=256)
     max_redirects: int | None = Field(default=None, ge=0, le=5)
     max_hops: int | None = Field(default=None, ge=1, le=30)
+    record_type: DnsRecordType | None = None
+    resolver_ip: str | None = Field(default=None, max_length=45)
 
 
 class TaskFrame(_Frame):
@@ -184,6 +191,10 @@ class TaskFrame(_Frame):
             raise ValueError("an http task needs a scheme and a path")
         if self.kind == "traceroute" and self.options.max_hops is None:
             raise ValueError("a traceroute task needs max_hops")
+        if self.kind == "dns" and (
+            self.options.record_type is None or self.target.hostname is None
+        ):
+            raise ValueError("a dns task needs a record_type and a hostname")
         return self
 
 
@@ -347,6 +358,52 @@ class HopDetail(_Frame):
         return value
 
 
+_CONTROL = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _text(value: str) -> str:
+    """Text from a DNS answer: any characters, but no control characters."""
+    return _CONTROL.sub("?", value)
+
+
+class DnsAnswerRecord(_Frame):
+    """One record of a DNS answer, as text."""
+
+    name: str = Field(max_length=255)
+    type: DnsRecordType
+    ttl: int = Field(ge=0, le=2**32 - 1)
+    data: str = Field(max_length=520)
+
+    @field_validator("name", "data")
+    @classmethod
+    def _clean(cls, value: str) -> str:
+        return _text(value)
+
+
+class DnsDetail(_Frame):
+    """What one DNS question found.
+
+    `resolver` is `system` (the node's own resolvers; their addresses are never reported) or the
+    public resolver that was asked. A response code other than NOERROR (`NXDOMAIN` is the usual
+    one) is still an answer. `redacted` counts answers from the node's own resolver that were
+    private addresses: they are left out, so a result never discloses someone's internal DNS.
+    """
+
+    resolver: str = Field(max_length=45)
+    record_type: DnsRecordType
+    rcode: str = Field(max_length=16)
+    authoritative: bool = False
+    via_tcp: bool = False
+    truncated: bool = False
+    answers: list[DnsAnswerRecord] = Field(default_factory=list, max_length=32)
+    redacted: int = Field(default=0, ge=0, le=1000)
+
+    @field_validator("resolver", "rcode")
+    @classmethod
+    def _clean(cls, value: str) -> str:
+        return _printable(value) or ""
+
+
 def parse_detail(kind: str, detail: dict[str, Any] | None) -> BaseModel | None:
     """The validated detail of a sample of this kind, or None if there is none or it is invalid."""
     if not detail:
@@ -356,6 +413,8 @@ def parse_detail(kind: str, detail: dict[str, Any] | None) -> BaseModel | None:
             return HttpDetail.model_validate(detail)
         if kind == "traceroute":
             return HopDetail.model_validate(detail)
+        if kind == "dns":
+            return DnsDetail.model_validate(detail)
     except ValueError:
         pass
     return None
