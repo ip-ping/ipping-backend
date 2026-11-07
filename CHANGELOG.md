@@ -4,6 +4,11 @@ Progress log for `ipping-backend`, newest first. Each entry is one small, tested
 
 ## Unreleased
 
+### 2026-11-07: the image has a place for the GeoIP databases
+- The container image creates `/data/geoip` (owned by the service user) and sets `IPPING_GEOIP_DIR` to it, so a
+  named volume mounted there is writable by the read-only container and `ipping-backend geoip-update` can fill it
+  (the application's compose file and installer now do exactly this). Empty, nothing changes.
+
 ### 2026-11-07: API keys, quotas and the text endpoint
 - **API keys** for scripts: created by an administrator (a name and quotas), shown once as `ipk_...`, stored as a
   SHA-256. With `Authorization: Bearer` (or `X-API-Key`) a script starts, lists, reads and cancels measurements

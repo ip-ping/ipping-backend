@@ -19,7 +19,11 @@ RUN uv sync --frozen --no-dev --no-editable
 
 FROM python:3.12-slim-bookworm
 
-RUN useradd --system --uid 10001 --no-create-home --shell /usr/sbin/nologin ipping
+RUN useradd --system --uid 10001 --no-create-home --shell /usr/sbin/nologin ipping \
+    # Where `ipping-backend geoip-update` puts the GeoIP databases. A named volume mounted here starts out
+    # owned by the service user, so the read-only container can still write to it.
+    && install -d -o ipping -g ipping -m 0750 /data/geoip
+ENV IPPING_GEOIP_DIR=/data/geoip
 
 COPY --from=build /app/.venv /app/.venv
 
