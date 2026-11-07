@@ -105,11 +105,11 @@ async def get_measurement(
 
 @router.get("/{measurement_id}/location", response_model=LocationEstimateOut)
 async def estimated_location(
-    measurement_id: str, session: OptionalSession, db: Db
+    measurement_id: str, request: Request, session: OptionalSession, db: Db
 ) -> LocationEstimateOut:
     """Where the target address appears to be, from the nodes' round-trip times (experimental)."""
     measurement = await _authorized(db, measurement_id, session)
-    return await location_for(db, measurement)
+    return await location_for(db, measurement, request.app.state.geoip)
 
 
 @router.post("/{measurement_id}/cancel", status_code=202)

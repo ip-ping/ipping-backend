@@ -11,12 +11,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import LocationEstimate, Measurement, MeasurementTask, utcnow
 from . import estimate as E
+from .estimate import haversine_km
+from .geoip import GeoIp, rule_out, valid_ip
 from .schemas import (
     AlternativeOut,
+    AsnOut,
     ClosestOut,
     EvidenceOut,
+    GeoIpOut,
     LocationEstimateOut,
     PlaceOut,
+    RuledOutOut,
 )
 
 
@@ -106,7 +111,73 @@ def _to_out(
     )
 
 
-async def location_for(db: AsyncSession, measurement: Measurement) -> LocationEstimateOut:
+def with_geoip(out: LocationEstimateOut, geoip: GeoIp | None) -> LocationEstimateOut:
+    """Add what the configured databases say, checked against this result's own measurements.
+
+    Done on every request rather than stored with the estimate: the databases are replaced every
+    month and the estimate is not.
+    """
+    ip = valid_ip(out.target_ip)
+    if geoip is None or ip is None:
+        return out
+    out = out.model_copy(deep=True)
+    asn = geoip.asn(ip)
+    if asn is not None:
+        out.asn = AsnOut(number=asn.number, organization=asn.organization)
+    place = geoip.place(ip)
+    if place is None:
+        return out
+    verified = [
+        (e.node_id, e.node_name, e.latitude, e.longitude, e.rtt_ms)
+        for e in out.evidence
+        if e.verified
+    ]
+    shown = PlaceOut(
+        name=place.name, country=place.country, latitude=place.latitude, longitude=place.longitude
+    )
+    to_estimate = (
+        round(
+            haversine_km(place.latitude, place.longitude, out.likely.latitude, out.likely.longitude)
+        )
+        if out.likely
+        else None
+    )
+    if not verified:
+        out.geoip = GeoIpOut(
+            source=geoip.source,
+            place=shown,
+            verdict="not_checked",
+            distance_to_estimate_km=to_estimate,
+            attribution=geoip.attribution,
+        )
+        return out
+    ruled = rule_out(place, verified)
+    out.geoip = GeoIpOut(
+        source=geoip.source,
+        place=shown,
+        verdict="ruled_out" if ruled else "consistent",
+        distance_to_estimate_km=to_estimate,
+        ruled_out_by=RuledOutOut(
+            node_id=ruled.node_id,
+            node_name=ruled.node_name,
+            rtt_ms=ruled.rtt_ms,
+            distance_km=round(ruled.distance_km),
+            max_distance_km=round(ruled.max_distance_km),
+        )
+        if ruled
+        else None,
+        attribution=geoip.attribution,
+    )
+    return out
+
+
+async def location_for(
+    db: AsyncSession, measurement: Measurement, geoip: GeoIp | None = None
+) -> LocationEstimateOut:
+    return with_geoip(await _stored_or_new(db, measurement), geoip)
+
+
+async def _stored_or_new(db: AsyncSession, measurement: Measurement) -> LocationEstimateOut:
     if measurement.status == "running":
         return _unavailable(
             measurement, "pending", "The estimate is made once every node has finished."

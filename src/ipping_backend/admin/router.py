@@ -313,7 +313,14 @@ async def patch_settings(
     return updated
 
 
+class GeoIpStatus(BaseModel):
+    city: bool
+    asn: bool
+    source: str | None = None
+
+
 class ServiceStatus(BaseModel):
+    geoip: GeoIpStatus
     nodes_online: int
     nodes_approved: int
     nodes_pending: int
@@ -334,7 +341,13 @@ async def service_status(request: Request, admin: AdminUser, db: Db) -> ServiceS
         .select_from(MeasurementTask)
         .where(MeasurementTask.status.in_(TASK_ACTIVE))
     )
+    geoip = request.app.state.geoip
     return ServiceStatus(
+        geoip=GeoIpStatus(
+            city=geoip.has_city,
+            asn=geoip.has_asn,
+            source=geoip.source if geoip.has_city or geoip.has_asn else None,
+        ),
         nodes_online=len(await _online(request, db)),
         nodes_approved=by_status.get("approved", 0),
         nodes_pending=by_status.get("pending", 0),

@@ -4,6 +4,24 @@ Progress log for `ipping-backend`, newest first. Each entry is one small, tested
 
 ## Unreleased
 
+### 2026-11-07: a GeoIP / ASN database as a second opinion
+- Optional. With `IPPING_GEOIP_DIR` (or explicit `IPPING_GEOIP_CITY_DB` / `IPPING_GEOIP_ASN_DB`) a result's
+  location gains `asn` (the network of the target) and `geoip`: the place a MaxMind-format database names,
+  its distance from the estimate, and a verdict. `ruled_out` names the node that makes the database's place
+  impossible (a node with a verified position that heard from the address in fewer milliseconds than light
+  needs to get there and back), so a database that puts an anycast address in one city is shown to be wrong
+  instead of believed. `consistent` and `not_checked` say what they say. The estimate is unchanged: it stays
+  the calibrated latency model, and the database is never an input to it.
+- `ipping-backend geoip-update` downloads the free DB-IP Lite city and ASN databases (CC BY 4.0; the result
+  carries the attribution), checks that each opens, is of the right type and answers for a well-known
+  address, and swaps it in atomically, so a server reading the directory never sees a half-written file.
+  Tried against the real files (126 MB city, 9 MB ASN): 1.1.1.1 is "Sydney, AS13335 Cloudflare", which is
+  exactly the case the cross-check exists for. The server reopens a database when its file changes: no restart
+  after the monthly update. Nothing is fetched while serving a request.
+- Admin status says whether the databases are loaded. 17 new tests (reading, replacing, newest file in a
+  directory, ruling out, the API with verified and unverified nodes, the updater with a fake download
+  including a corrupt one and the wrong kind). Geofeeds (RFC 8805) are not used.
+
 ### 2026-11-07: DNS checks
 - A new kind, `dns`: every node asks a resolver about a name and the answers are compared. Options
   `record_type` (`A` by default, `AAAA`, `CNAME`, `MX`, `NS`, `TXT`, `SOA`) and `resolver` (`system`, the

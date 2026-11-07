@@ -235,6 +235,24 @@
         "title": "AlternativeOut",
         "type": "object"
       },
+      "AsnOut": {
+        "properties": {
+          "number": {
+            "title": "Number",
+            "type": "integer"
+          },
+          "organization": {
+            "title": "Organization",
+            "type": "string"
+          }
+        },
+        "required": [
+          "number",
+          "organization"
+        ],
+        "title": "AsnOut",
+        "type": "object"
+      },
       "AuditOut": {
         "properties": {
           "action": {
@@ -803,6 +821,102 @@
         "title": "EvidenceOut",
         "type": "object"
       },
+      "GeoIpOut": {
+        "description": "What a GeoIP database says about the address, checked against the measurements.\n\nIt never changes the estimate. `ruled_out` means a node measured the address too close for the\ndatabase's place to be right; `consistent` only means no measurement contradicts it.",
+        "properties": {
+          "attribution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attribution"
+          },
+          "distance_to_estimate_km": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "From the place the database names to the likely place",
+            "title": "Distance To Estimate Km"
+          },
+          "place": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PlaceOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ruled_out_by": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RuledOutOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "verdict": {
+            "enum": [
+              "consistent",
+              "ruled_out",
+              "not_checked"
+            ],
+            "title": "Verdict",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "verdict"
+        ],
+        "title": "GeoIpOut",
+        "type": "object"
+      },
+      "GeoIpStatus": {
+        "properties": {
+          "asn": {
+            "title": "Asn",
+            "type": "boolean"
+          },
+          "city": {
+            "title": "City",
+            "type": "boolean"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          }
+        },
+        "required": [
+          "city",
+          "asn"
+        ],
+        "title": "GeoIpStatus",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -1047,6 +1161,17 @@
             "title": "Alternatives",
             "type": "array"
           },
+          "asn": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AsnOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The network, if an ASN database is set up"
+          },
           "closest": {
             "anyOf": [
               {
@@ -1064,6 +1189,17 @@
             },
             "title": "Evidence",
             "type": "array"
+          },
+          "geoip": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GeoIpOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A configured GeoIP database's answer, checked against the nodes"
           },
           "likely": {
             "anyOf": [
@@ -1807,6 +1943,41 @@
         "title": "RotatedCredential",
         "type": "object"
       },
+      "RuledOutOut": {
+        "properties": {
+          "distance_km": {
+            "description": "From that node to the place the database names",
+            "title": "Distance Km",
+            "type": "integer"
+          },
+          "max_distance_km": {
+            "description": "The most a round trip that short allows (light)",
+            "title": "Max Distance Km",
+            "type": "integer"
+          },
+          "node_id": {
+            "title": "Node Id",
+            "type": "string"
+          },
+          "node_name": {
+            "title": "Node Name",
+            "type": "string"
+          },
+          "rtt_ms": {
+            "title": "Rtt Ms",
+            "type": "number"
+          }
+        },
+        "required": [
+          "node_id",
+          "node_name",
+          "rtt_ms",
+          "distance_km",
+          "max_distance_km"
+        ],
+        "title": "RuledOutOut",
+        "type": "object"
+      },
       "RuntimeSettings": {
         "properties": {
           "allowed_ports": {
@@ -2245,6 +2416,9 @@
       },
       "ServiceStatus": {
         "properties": {
+          "geoip": {
+            "$ref": "#/components/schemas/GeoIpStatus"
+          },
           "live_streams": {
             "title": "Live Streams",
             "type": "integer"
@@ -2271,6 +2445,7 @@
           }
         },
         "required": [
+          "geoip",
           "nodes_online",
           "nodes_approved",
           "nodes_pending",

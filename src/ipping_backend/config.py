@@ -29,6 +29,13 @@ class Settings(BaseSettings):
     # Browsers refuse to store Secure cookies over plain HTTP, so IP-only installs turn this off.
     cookie_secure: bool = True
 
+    # Optional GeoIP / ASN databases (MaxMind-format .mmdb: GeoLite2 or DB-IP Lite). With a directory, the
+    # newest *city*.mmdb and *asn*.mmdb in it are used; `ipping-backend geoip-update` fills it. They add a
+    # second opinion to the location estimate that is checked against the measurements; nothing else.
+    geoip_dir: str | None = None
+    geoip_city_db: str | None = None
+    geoip_asn_db: str | None = None
+
     log_level: str = "INFO"
     log_json: bool = True
 

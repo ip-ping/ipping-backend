@@ -19,6 +19,7 @@ from .cluster import Cluster
 from .config import Settings, get_settings
 from .db import make_engine, make_sessionmaker
 from .errors import install_error_handlers
+from .geolocation.geoip import GeoIp
 from .logging_config import configure_logging
 from .measurements import router as measurements_router
 from .measurements.engine import MeasurementEngine
@@ -100,6 +101,9 @@ def create_app(
         app.state.registry = registry
         app.state.cluster = cluster
         app.state.engine = engine
+        app.state.geoip = GeoIp.from_settings(
+            settings.geoip_dir, settings.geoip_city_db, settings.geoip_asn_db
+        )
 
         if create_schema:
             async with db_engine.begin() as conn:

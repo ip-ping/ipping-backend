@@ -10,6 +10,11 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument("--version", action="version", version=__version__)
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("migrate", help="Upgrade the database schema to the latest version")
+    geoip = sub.add_parser(
+        "geoip-update",
+        help="Download the free DB-IP Lite city and ASN databases (CC BY 4.0) for location cross-checks",
+    )
+    geoip.add_argument("--dir", default=None, help="Where to put them (default: IPPING_GEOIP_DIR)")
     serve = sub.add_parser("serve", help="Run the API server")
     serve.add_argument("--host", default=None)
     serve.add_argument("--port", type=int, default=None)
@@ -31,6 +36,19 @@ def main(argv: list[str] | None = None) -> None:
 
         command.upgrade(alembic_config(settings.database_url), "head")
         print("Database is up to date.")
+    elif args.command == "geoip-update":
+        from pathlib import Path
+
+        from .geolocation.update import update
+
+        directory = args.dir or settings.geoip_dir
+        if not directory:
+            parser.error("give --dir or set IPPING_GEOIP_DIR")
+        for path in update(Path(directory)):
+            print(f"{path.name}: {path.stat().st_size // 1_000_000} MB")
+        print(
+            "IP geolocation by DB-IP (db-ip.com), CC BY 4.0. The server picks the files up by itself."
+        )
     elif args.command == "serve":
         import uvicorn
 

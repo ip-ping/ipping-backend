@@ -95,6 +95,8 @@ bring up the backend together with the frontend, database and reverse proxy.
 | `IPPING_REAPER_INTERVAL_S` / `IPPING_DISPATCH_POLL_S` | `1` / `1` | How often deadlines are checked and pending tasks are looked for (notifications make both faster) |
 | `IPPING_INSTANCE_DEAD_AFTER_S` | `10` | How long without a heartbeat before an instance counts as dead |
 | `IPPING_PENDING_GRACE_S` | `5` | How long a task waits for a node that is not connected before it is given up on |
+| `IPPING_GEOIP_DIR` | unset | Directory of GeoIP / ASN databases (`.mmdb`); the newest `*city*.mmdb` and `*asn*.mmdb` in it are used. `ipping-backend geoip-update` fills it |
+| `IPPING_GEOIP_CITY_DB` / `IPPING_GEOIP_ASN_DB` | unset | Explicit paths to a city and an ASN database instead of a directory |
 | `FORWARDED_ALLOW_IPS` | `127.0.0.1` | Reverse proxies whose `X-Forwarded-*` headers are trusted |
 
 Limits that an operator may need to change while running live in the database and are edited
@@ -209,6 +211,24 @@ What this says, and does not:
 * The estimator can only name cities of 100,000 people or more, so a target in a small town is never
   closer than the nearest such city (median 7 km here, but it can be far for remote targets).
 
+### A GeoIP database as a second opinion (optional)
+
+Set `IPPING_GEOIP_DIR` (and run `ipping-backend geoip-update`, which downloads the free DB-IP Lite city
+and ASN databases and checks them before swapping them in; any MaxMind-format `.mmdb` such as GeoLite2
+works too) and a result gains two things, neither of which changes the estimate:
+
+* **The network**: the AS number and organisation of the target (`asn`).
+* **A cross-check** (`geoip`): the place the database names, how far it is from the estimated place, and
+  a verdict. `ruled_out` means a node with a verified position heard from the address so quickly that the
+  database's place is impossible (150 km of distance per round-trip millisecond is a limit of physics,
+  and the node is named); `consistent` only means no measurement contradicts it; `not_checked` means no
+  node with a verified position took part. Anycast addresses are the usual cause of a ruled-out place:
+  a database names one city for an address that answers from many.
+
+The databases are read from disk and picked up again when a file changes (no restart after the monthly
+update), and nothing is fetched while serving a request. DB-IP Lite is licensed CC BY 4.0 and the result
+carries the attribution it asks for. Geofeeds (RFC 8805) are not used.
+
 Anycast addresses, CDN edges and VPN endpoints are located where they answer from, not where their
 operator or users are. To redo this: `uv run python scripts/collect_atlas.py` (needs the network) and
 `uv run python scripts/evaluate_location.py --set test`.
@@ -267,7 +287,8 @@ on the dead worker. The two-instance behaviour is covered by `tests/test_cluster
 * Public IPv6 has not been tested end to end (the development machine has no IPv6 internet); IPv6
   targets, IPv6 loopback and an IPv6 traceroute through network namespaces were.
 * The location estimate is only as good as the nodes' coordinates and how close the nearest node is
-  (see the table above); it is not a geolocation database and uses no GeoIP data.
+  (see the table above); it is not a geolocation database. An optional GeoIP database can be set up as a
+  cross-check, but it never feeds the estimate, and geofeeds are not read.
 * A task is sent again (once, `task_retries`) only when its backend instance died and the node had
   produced nothing yet. Once a node has produced samples a crash means `interrupted` with the
   partial results kept, because starting over would discard them. A node that drops is never
@@ -313,7 +334,7 @@ Small steps, each one committed and logged in [CHANGELOG.md](CHANGELOG.md).
 - [ ] Public IPv6 verified end to end (needs a test host with IPv6 internet)
 - [x] Estimated network location: constraint-based, evidence listed, explicit "insufficient evidence"
 - [x] Calibrate the location model against real targets of known location (RIPE Atlas anchors; held-out half reported)
-- [ ] Optionally add GeoIP / ASN / geofeed evidence to the location estimate
+- [x] A GeoIP / ASN database as a checked second opinion (ruled out by the measurements, or consistent); geofeeds (RFC 8805) not done
 
 ## License
 

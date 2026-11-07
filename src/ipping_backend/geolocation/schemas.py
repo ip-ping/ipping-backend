@@ -43,6 +43,36 @@ class EvidenceOut(BaseModel):
     )
 
 
+class RuledOutOut(BaseModel):
+    node_id: str
+    node_name: str
+    rtt_ms: float
+    distance_km: int = Field(description="From that node to the place the database names")
+    max_distance_km: int = Field(description="The most a round trip that short allows (light)")
+
+
+class GeoIpOut(BaseModel):
+    """What a GeoIP database says about the address, checked against the measurements.
+
+    It never changes the estimate. `ruled_out` means a node measured the address too close for the
+    database's place to be right; `consistent` only means no measurement contradicts it.
+    """
+
+    source: str
+    place: PlaceOut | None = None
+    verdict: Literal["consistent", "ruled_out", "not_checked"]
+    distance_to_estimate_km: int | None = Field(
+        default=None, description="From the place the database names to the likely place"
+    )
+    ruled_out_by: RuledOutOut | None = None
+    attribution: str | None = None
+
+
+class AsnOut(BaseModel):
+    number: int
+    organization: str
+
+
 class LocationEstimateOut(BaseModel):
     status: Literal["estimated", "inconclusive", "insufficient_evidence", "unavailable", "pending"]
     summary: str
@@ -59,3 +89,9 @@ class LocationEstimateOut(BaseModel):
     nodes_total: int = 0
     warnings: list[str] = []
     limitations: list[str] = []
+    geoip: GeoIpOut | None = Field(
+        default=None, description="A configured GeoIP database's answer, checked against the nodes"
+    )
+    asn: AsnOut | None = Field(
+        default=None, description="The network, if an ASN database is set up"
+    )
