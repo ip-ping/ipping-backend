@@ -121,8 +121,38 @@ Interactive docs are at `/api/docs`; the machine-readable contract is `contracts
 | `GET /api/v1/nodes` | the approved nodes, whether each is online, and the kinds it can run |
 | `POST /api/v1/nodes/enroll`, `WS /api/v1/nodes/connect` | what a node uses |
 | `/api/v1/admin/...` | nodes (approve, revoke, rotate credential), enrollment tokens, settings, audit, status |
+| `GET /api/v1/text?target=...` | with an API key: start a measurement, wait, and get the result as plain text (for `curl` and the command-line client) |
+| `/api/v1/admin/api-keys/...` | API keys for scripts: create (shown once), change quotas, revoke |
 | `/api/v1/admin/watches/...` | scheduled checks and alerts: list, create, change, delete, `run`, `test-alert`, `runs` (see below) |
 | `GET /api/v1/health/live`, `/ready` | liveness and readiness |
+
+## API keys: scripts without a browser
+
+An administrator creates a key (`POST /api/v1/admin/api-keys`: a name and its quotas) and gets it **once**,
+as `ipk_...`; only its SHA-256 is stored (it has 256 bits of entropy, so there is nothing to brute-force). A
+script sends `Authorization: Bearer ipk_...` (or `X-API-Key`) and then needs no browser session, no cookie and
+no CSRF token:
+
+```sh
+curl -s -H "Authorization: Bearer $KEY" "https://ipping.example.com/api/v1/text?target=example.com&kind=dns&record_type=MX"
+curl -s -H "Authorization: Bearer $KEY" -H "Content-Type: application/json" \
+     -d '{"target":"example.com:443","kind":"tcp"}' https://ipping.example.com/api/v1/measurements
+```
+
+* **Quotas of its own.** Each key may start `per_minute` (30) and `per_day` (1,000) measurements and run as many at
+  once as a visitor can; they are counted from the measurements the key made, not from a counter that could
+  drift, and the per-address and per-session limits that browsers get do not apply. A key over its quota gets a
+  429 saying which limit.
+* **A key sees its own.** It can read, list and cancel the measurements it started, and no one else's (another
+  key gets the same 404 as for a measurement that does not exist); administrators can open them too.
+* **A wrong or revoked key is refused (401), not ignored**, so a script learns at once; something that is not
+  shaped like a key is just an anonymous request.
+* `GET /api/v1/text` **needs a key and never a session**: it has a side effect, so it must not be something a
+  web page can make a visitor's browser do. It waits for the result (`wait`, 1 to 30 seconds, 20 by default) and
+  prints a report like `ping` or `traceroute` would (`X-Measurement-Id` and `X-Measurement-Status` come as
+  headers; if the measurement is still running the text says so).
+* The key's start, the administrator and the time are in the audit trail; the key never is. `last_used_at` is
+  kept for the administrator (updated at most once a minute).
 
 ## Watches: scheduled checks and alerts
 
@@ -337,7 +367,7 @@ first because the application release pins it.
 
 | Release | Database head | Notes |
 |---|---|---|
-| v0.4.0 | `0007` | DNS checks (`dns` is enabled for deployments that had every kind on); GeoIP / ASN cross-check; watches |
+| v0.4.0 | `0008` | DNS checks (`dns` is enabled for deployments that had every kind on); GeoIP / ASN cross-check; watches; API keys and the text endpoint |
 | v0.3.0 | `0005` | TCP, HTTP and traceroute; tasks sent again when their instance dies; calibrated location model |
 | v0.2.0 | `0002` | estimated location; signed releases |
 | v0.1.0 | `0001` | first release |
@@ -362,6 +392,7 @@ Small steps, each one committed and logged in [CHANGELOG.md](CHANGELOG.md).
 - [ ] Per-session / per-IP quota tuning from real traffic
 - [x] TCP, HTTP and traceroute (protocol, planning, validation, tests; node and frontend shipped in v0.3.0)
 - [x] Tasks sent again when their backend instance dies before the node produced anything
+- [x] API keys with quotas of their own, and a plain-text endpoint for `curl` (the command-line client is in the ipping repository)
 - [x] Scheduled checks (watches) with quiet alerts to a webhook or ntfy, safe with several instances
 - [x] DNS checks (record types, public or per-node resolvers, privacy rules; the comparison view is in the web interface)
 - [ ] Public IPv6 verified end to end (needs a test host with IPv6 internet)

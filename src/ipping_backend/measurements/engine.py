@@ -71,6 +71,10 @@ class MeasurementError(Exception):
 class Owner:
     session_id: str | None
     user_id: int | None = None
+    # A script's API key and what it may do per minute and per day (None: not a script).
+    api_key_id: str | None = None
+    per_minute: int | None = None
+    per_day: int | None = None
 
 
 @dataclass
@@ -279,6 +283,7 @@ class MeasurementEngine:
                 options=plan.options,
                 owner_session_id=owner.session_id,
                 owner_user_id=owner.user_id,
+                owner_api_key_id=owner.api_key_id,
                 source_ip=source_ip,
                 watch_id=watch_id,
                 created_at=now,
@@ -339,6 +344,9 @@ class MeasurementEngine:
         owner: Owner,
         source_ip: str | None,
     ) -> None:
+        if owner.api_key_id:
+            await self._check_key_quota(session, settings, owner)
+            return
         if source_ip:
             if not await allow(
                 session, f"create:{source_ip}", settings.creations_per_minute_per_ip, 60
@@ -373,6 +381,46 @@ class MeasurementEngine:
                     "Wait for one to finish or cancel it.",
                     429,
                 )
+
+    async def _check_key_quota(
+        self, session: AsyncSession, settings: RuntimeSettings, owner: Owner
+    ) -> None:
+        """A key has its own budget, counted from the measurements it made (so it cannot drift from
+        reality), instead of the per-address and per-session limits that browsers get."""
+        now = utcnow()
+
+        async def made(since: timedelta) -> int:
+            count = await session.scalar(
+                select(func.count())
+                .select_from(Measurement)
+                .where(
+                    Measurement.owner_api_key_id == owner.api_key_id,
+                    Measurement.created_at > now - since,
+                )
+            )
+            return count or 0
+
+        if owner.per_minute is not None and await made(timedelta(minutes=1)) >= owner.per_minute:
+            raise MeasurementError(
+                "rate_limited", f"This key may start {owner.per_minute} measurements a minute.", 429
+            )
+        if owner.per_day is not None and await made(timedelta(days=1)) >= owner.per_day:
+            raise MeasurementError(
+                "rate_limited", f"This key may start {owner.per_day} measurements a day.", 429
+            )
+        running = await session.scalar(
+            select(func.count())
+            .select_from(Measurement)
+            .where(
+                Measurement.owner_api_key_id == owner.api_key_id, Measurement.status == "running"
+            )
+        )
+        if (running or 0) >= settings.max_concurrent_per_session:
+            raise MeasurementError(
+                "too_many_running",
+                f"This key can run {settings.max_concurrent_per_session} measurements at a time.",
+                429,
+            )
 
     async def _inflight_probes(self, session: AsyncSession) -> int:
         rows = (

@@ -3,17 +3,19 @@
 from __future__ import annotations
 
 from collections.abc import AsyncIterator
+from datetime import timedelta
 from typing import Annotated
 from urllib.parse import urlsplit
 
 from fastapi import Depends, Request, WebSocket
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .errors import ApiError
 from .measurements.engine import MeasurementEngine
-from .models import User, WebSession
+from .models import ApiKey, User, WebSession, utcnow
 from .security.sessions import SESSION_COOKIE, find_session
-from .security.tokens import secrets_match
+from .security.tokens import hash_secret, secrets_match
 
 SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 CSRF_HEADER = "x-csrf-token"
@@ -48,6 +50,40 @@ async def get_session_optional(request: Request, db: Db) -> WebSession | None:
 
 
 OptionalSession = Annotated[WebSession | None, Depends(get_session_optional)]
+
+
+API_KEY_PREFIX = "ipk_"
+
+
+def _presented_key(request: Request) -> str | None:
+    """The key a script sent: `Authorization: Bearer ipk_...` or `X-API-Key: ipk_...`."""
+    header = request.headers.get("authorization", "")
+    if header.lower().startswith("bearer "):
+        candidate = header[7:].strip()
+    else:
+        candidate = request.headers.get("x-api-key", "").strip()
+    return candidate if candidate.startswith(API_KEY_PREFIX) else None
+
+
+async def get_api_key_optional(request: Request, db: Db) -> ApiKey | None:
+    """The API key of this request, if it carries one. A key that is wrong or revoked is refused, not
+    ignored: a script should learn at once that it is not authorised."""
+    presented = _presented_key(request)
+    if presented is None:
+        return None
+    key = (
+        await db.execute(select(ApiKey).where(ApiKey.key_hash == hash_secret(presented)))
+    ).scalar_one_or_none()
+    if key is None or key.revoked_at is not None:
+        raise ApiError(401, "invalid_api_key", "That API key is not valid.")
+    # "last used" is for the administrator; a write on every request would be pointless
+    if key.last_used_at is None or utcnow() - key.last_used_at > timedelta(minutes=1):
+        key.last_used_at = utcnow()
+        await db.commit()
+    return key
+
+
+OptionalApiKey = Annotated[ApiKey | None, Depends(get_api_key_optional)]
 
 
 async def require_session(session: OptionalSession) -> WebSession:

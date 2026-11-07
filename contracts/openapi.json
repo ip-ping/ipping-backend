@@ -235,6 +235,242 @@
         "title": "AlternativeOut",
         "type": "object"
       },
+      "ApiKeyCreate": {
+        "properties": {
+          "name": {
+            "maxLength": 80,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "per_day": {
+            "default": 1000,
+            "description": "Measurements it may start a day",
+            "maximum": 100000.0,
+            "minimum": 1.0,
+            "title": "Per Day",
+            "type": "integer"
+          },
+          "per_minute": {
+            "default": 30,
+            "description": "Measurements it may start a minute",
+            "maximum": 600.0,
+            "minimum": 1.0,
+            "title": "Per Minute",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "ApiKeyCreate",
+        "type": "object"
+      },
+      "ApiKeyCreated": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "key": {
+            "description": "The key. It is shown once; only a hash is kept.",
+            "title": "Key",
+            "type": "string"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "made_24h": {
+            "description": "Measurements it started in the last day",
+            "title": "Made 24H",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "per_day": {
+            "title": "Per Day",
+            "type": "integer"
+          },
+          "per_minute": {
+            "title": "Per Minute",
+            "type": "integer"
+          },
+          "prefix": {
+            "description": "The start of the key: enough to tell keys apart, not to use one",
+            "title": "Prefix",
+            "type": "string"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "prefix",
+          "per_minute",
+          "per_day",
+          "created_by",
+          "created_at",
+          "last_used_at",
+          "revoked_at",
+          "made_24h",
+          "key"
+        ],
+        "title": "ApiKeyCreated",
+        "type": "object"
+      },
+      "ApiKeyOut": {
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "title": "Created By",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "made_24h": {
+            "description": "Measurements it started in the last day",
+            "title": "Made 24H",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "per_day": {
+            "title": "Per Day",
+            "type": "integer"
+          },
+          "per_minute": {
+            "title": "Per Minute",
+            "type": "integer"
+          },
+          "prefix": {
+            "description": "The start of the key: enough to tell keys apart, not to use one",
+            "title": "Prefix",
+            "type": "string"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "prefix",
+          "per_minute",
+          "per_day",
+          "created_by",
+          "created_at",
+          "last_used_at",
+          "revoked_at",
+          "made_24h"
+        ],
+        "title": "ApiKeyOut",
+        "type": "object"
+      },
+      "ApiKeyPatch": {
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 80,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "per_day": {
+            "anyOf": [
+              {
+                "maximum": 100000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Per Day"
+          },
+          "per_minute": {
+            "anyOf": [
+              {
+                "maximum": 600.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Per Minute"
+          }
+        },
+        "title": "ApiKeyPatch",
+        "type": "object"
+      },
       "AsnOut": {
         "properties": {
           "number": {
@@ -3930,6 +4166,155 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/admin/api-keys": {
+      "get": {
+        "operationId": "list_keys_api_v1_admin_api_keys_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ApiKeyOut"
+                  },
+                  "title": "Response List Keys Api V1 Admin Api Keys Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "List Keys",
+        "tags": [
+          "api keys"
+        ]
+      },
+      "post": {
+        "operationId": "create_key_api_v1_admin_api_keys_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiKeyCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyCreated"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Key",
+        "tags": [
+          "api keys"
+        ]
+      }
+    },
+    "/api/v1/admin/api-keys/{key_id}": {
+      "delete": {
+        "operationId": "revoke_key_api_v1_admin_api_keys__key_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Revoke Key",
+        "tags": [
+          "api keys"
+        ]
+      },
+      "patch": {
+        "operationId": "change_key_api_v1_admin_api_keys__key_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ApiKeyPatch"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiKeyOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Change Key",
+        "tags": [
+          "api keys"
+        ]
+      }
+    },
     "/api/v1/admin/audit": {
       "get": {
         "operationId": "audit_log_api_v1_admin_audit_get",
@@ -5317,6 +5702,221 @@
         "summary": "Setup Status",
         "tags": [
           "session"
+        ]
+      }
+    },
+    "/api/v1/text": {
+      "get": {
+        "operationId": "text_measurement_api_v1_text_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "target",
+            "required": true,
+            "schema": {
+              "maxLength": 2048,
+              "minLength": 1,
+              "title": "Target",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "default": "ping",
+              "enum": [
+                "ping",
+                "tcp",
+                "http",
+                "traceroute",
+                "dns"
+              ],
+              "title": "Kind",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "port",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 65535,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Port"
+            }
+          },
+          {
+            "in": "query",
+            "name": "count",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 10,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Count"
+            }
+          },
+          {
+            "in": "query",
+            "name": "record_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "A",
+                    "AAAA",
+                    "CNAME",
+                    "MX",
+                    "NS",
+                    "TXT",
+                    "SOA"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Record Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "resolver",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "system",
+                    "cloudflare",
+                    "google",
+                    "quad9"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Resolver"
+            }
+          },
+          {
+            "in": "query",
+            "name": "follow_redirects",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Follow Redirects",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "family",
+            "required": false,
+            "schema": {
+              "default": "auto",
+              "enum": [
+                "auto",
+                "4",
+                "6"
+              ],
+              "title": "Family",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "dns_mode",
+            "required": false,
+            "schema": {
+              "default": "fixed",
+              "enum": [
+                "fixed",
+                "regional"
+              ],
+              "title": "Dns Mode",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Comma-separated ISO country codes",
+            "in": "query",
+            "name": "countries",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Comma-separated ISO country codes",
+              "title": "Countries"
+            }
+          },
+          {
+            "description": "Seconds to wait for the result",
+            "in": "query",
+            "name": "wait",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "description": "Seconds to wait for the result",
+              "maximum": 30,
+              "minimum": 1,
+              "title": "Wait",
+              "type": "number"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Text Measurement",
+        "tags": [
+          "measurements"
         ]
       }
     }

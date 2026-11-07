@@ -4,6 +4,22 @@ Progress log for `ipping-backend`, newest first. Each entry is one small, tested
 
 ## Unreleased
 
+### 2026-11-07: API keys, quotas and the text endpoint
+- **API keys** for scripts: created by an administrator (a name and quotas), shown once as `ipk_...`, stored as a
+  SHA-256. With `Authorization: Bearer` (or `X-API-Key`) a script starts, lists, reads and cancels measurements
+  with no browser session, cookie or CSRF token. A key may start `per_minute` (30) and `per_day` (1,000)
+  measurements, counted from the measurements it actually made, and run as many at once as a visitor; the
+  per-address and per-session limits browsers get do not apply to it. Another key, or no key, sees a 404 for its
+  measurements; administrators can open them. A wrong or revoked key is a 401 instead of being ignored.
+- **`GET /api/v1/text`** starts a measurement and returns the result as plain text (the report `ping` or
+  `traceroute` would print), waiting up to `wait` seconds (20 by default). It needs a key and never a session,
+  because a GET with a side effect must not be something a web page can make a browser do. An invalid query is a
+  422, not a 500 (found by the tests: a validation error raised by hand escaped the error handler).
+- Migration `0008` (`api_keys`, `measurements.owner_api_key_id`). 15 new tests: only a hash is stored and the key
+  never appears in the audit trail, quotas per key (minute, day, concurrency), keys cannot see each other's
+  measurements, revoked and malformed keys, last use, the text endpoint with a fake node answering while the
+  request waits, and the report for each kind.
+
 ### 2026-11-07: watches: scheduled checks and alerts
 - A **watch** runs a measurement on a schedule (every 60 s at the least) and alerts when the target stops
   answering. A run is `ok`, `degraded` (fewer than `min_ok_pct` of the nodes got a good answer) or `down`, judged

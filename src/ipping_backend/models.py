@@ -158,6 +158,8 @@ class Measurement(Base):
     shared: Mapped[bool] = mapped_column(Boolean, default=False)
     # The scheduled check (watch) that started this measurement, if one did.
     watch_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
+    # The API key that started it, if one did (it can then read and cancel it).
+    owner_api_key_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     event_seq: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow, index=True)
     deadline_at: Mapped[datetime] = mapped_column(UTCDateTime)
@@ -348,3 +350,25 @@ class WatchRun(Base):
     min_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
     max_ms: Mapped[float | None] = mapped_column(Float, nullable=True)
     note: Mapped[str | None] = mapped_column(String(200), nullable=True)
+
+
+class ApiKey(Base):
+    """A credential for scripts: starts measurements without a browser, within its own quotas.
+
+    Only a hash of the key is stored (it has 256 bits of entropy, so a plain SHA-256 is enough); the key
+    itself is shown once, when it is created.
+    """
+
+    __tablename__ = "api_keys"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=new_id)
+    name: Mapped[str] = mapped_column(String(80))
+    # The start of the key, so an administrator can tell keys apart; not enough to use it.
+    prefix: Mapped[str] = mapped_column(String(16))
+    key_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    per_minute: Mapped[int] = mapped_column(Integer, default=30)
+    per_day: Mapped[int] = mapped_column(Integer, default=1000)
+    created_by: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
+    last_used_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)

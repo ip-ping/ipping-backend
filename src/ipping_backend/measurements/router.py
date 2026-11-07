@@ -12,6 +12,7 @@ from ..deps import (
     CurrentSession,
     Db,
     Engine,
+    OptionalApiKey,
     OptionalSession,
     client_ip,
     csrf_protect,
@@ -19,7 +20,7 @@ from ..deps import (
 from ..errors import ApiError
 from ..geolocation.schemas import LocationEstimateOut
 from ..geolocation.service import location_for
-from ..models import Measurement, MeasurementEvent, User, WebSession
+from ..models import ApiKey, Measurement, MeasurementEvent, User, WebSession
 from . import schemas
 from .engine import Owner
 
@@ -40,16 +41,24 @@ async def _is_admin(db: Db, session: WebSession | None) -> bool:
 
 
 async def _authorized(
-    db: Db, measurement_id: str, session: WebSession | None, *, owner_only: bool = False
+    db: Db,
+    measurement_id: str,
+    session: WebSession | None,
+    key: ApiKey | None = None,
+    *,
+    owner_only: bool = False,
 ) -> Measurement:
-    """Owner, administrator, or (for read access) anyone when the owner shared it.
+    """Owner (a browser session, or the API key that started it), administrator, or (for read access)
+    anyone when the owner shared it.
 
     Everything else gets the same 404 as a measurement that does not exist.
     """
     measurement = await db.get(Measurement, measurement_id)
     allowed = False
     if measurement is not None:
-        is_owner = session is not None and measurement.owner_session_id == session.id
+        is_owner = (session is not None and measurement.owner_session_id == session.id) or (
+            key is not None and measurement.owner_api_key_id == key.id
+        )
         allowed = is_owner or await _is_admin(db, session)
         if not owner_only and measurement.shared:
             allowed = True
@@ -62,13 +71,19 @@ async def _authorized(
 async def create_measurement(
     body: schemas.CreateMeasurementRequest,
     request: Request,
-    session: CurrentSession,
+    session: OptionalSession,
+    key: OptionalApiKey,
     engine: Engine,
     db: Db,
 ) -> schemas.MeasurementOut:
-    measurement_id = await engine.create(
-        body, Owner(session_id=session.id, user_id=session.user_id), client_ip(request)
-    )
+    if key is not None:
+        # A script: its own quotas apply, and the measurement is readable with the same key.
+        owner = Owner(None, None, key.id, key.per_minute, key.per_day)
+    elif session is not None:
+        owner = Owner(session_id=session.id, user_id=session.user_id)
+    else:
+        raise ApiError(401, "session_required", "Load the page again to start a session.")
+    measurement_id = await engine.create(body, owner, client_ip(request))
     result = await engine.load(db, measurement_id)
     assert result is not None  # noqa: S101 - it was committed a moment ago
     return result
@@ -76,17 +91,21 @@ async def create_measurement(
 
 @router.get("", response_model=list[schemas.MeasurementOut])
 async def list_my_measurements(
-    session: CurrentSession,
+    session: OptionalSession,
+    key: OptionalApiKey,
     engine: Engine,
     db: Db,
     limit: Annotated[int, Query(ge=1, le=50)] = 10,
 ) -> list[schemas.MeasurementOut]:
+    if key is not None:
+        mine = Measurement.owner_api_key_id == key.id
+    elif session is not None:
+        mine = Measurement.owner_session_id == session.id
+    else:
+        raise ApiError(401, "session_required", "Load the page again to start a session.")
     ids = (
         await db.execute(
-            select(Measurement.id)
-            .where(Measurement.owner_session_id == session.id)
-            .order_by(Measurement.created_at.desc())
-            .limit(limit)
+            select(Measurement.id).where(mine).order_by(Measurement.created_at.desc()).limit(limit)
         )
     ).scalars()
     results = [await engine.load(db, mid) for mid in ids]
@@ -95,9 +114,9 @@ async def list_my_measurements(
 
 @router.get("/{measurement_id}", response_model=schemas.MeasurementOut)
 async def get_measurement(
-    measurement_id: str, session: OptionalSession, engine: Engine, db: Db
+    measurement_id: str, session: OptionalSession, key: OptionalApiKey, engine: Engine, db: Db
 ) -> schemas.MeasurementOut:
-    await _authorized(db, measurement_id, session)
+    await _authorized(db, measurement_id, session, key)
     result = await engine.load(db, measurement_id)
     assert result is not None  # noqa: S101
     return result
@@ -105,18 +124,18 @@ async def get_measurement(
 
 @router.get("/{measurement_id}/location", response_model=LocationEstimateOut)
 async def estimated_location(
-    measurement_id: str, request: Request, session: OptionalSession, db: Db
+    measurement_id: str, request: Request, session: OptionalSession, key: OptionalApiKey, db: Db
 ) -> LocationEstimateOut:
     """Where the target address appears to be, from the nodes' round-trip times (experimental)."""
-    measurement = await _authorized(db, measurement_id, session)
+    measurement = await _authorized(db, measurement_id, session, key)
     return await location_for(db, measurement, request.app.state.geoip)
 
 
 @router.post("/{measurement_id}/cancel", status_code=202)
 async def cancel_measurement(
-    measurement_id: str, session: CurrentSession, engine: Engine, db: Db
+    measurement_id: str, session: OptionalSession, key: OptionalApiKey, engine: Engine, db: Db
 ) -> dict[str, str]:
-    await _authorized(db, measurement_id, session, owner_only=True)
+    await _authorized(db, measurement_id, session, key, owner_only=True)
     await engine.cancel(measurement_id)
     return {"status": "cancelling"}
 
@@ -141,6 +160,7 @@ async def stream_events(
     measurement_id: str,
     request: Request,
     session: OptionalSession,
+    key: OptionalApiKey,
     engine: Engine,
     db: Db,
     after: Annotated[int | None, Query(ge=0, description="Resume after this event id")] = None,
@@ -148,7 +168,7 @@ async def stream_events(
 ) -> StreamingResponse:
     """Server-Sent Events. Reconnecting with `Last-Event-ID` (browsers do this on their own)
     replays whatever was missed, so a dropped connection never loses a result."""
-    await _authorized(db, measurement_id, session)
+    await _authorized(db, measurement_id, session, key)
     await db.rollback()  # release the pooled connection: this response can stay open for minutes
     resume = after
     if resume is None and last_event_id and last_event_id.isdigit():
