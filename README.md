@@ -8,7 +8,7 @@ This repository is the coordinator. It validates targets, schedules work onto no
 aggregates results, estimates where an address appears to be, and owns the contracts the other two
 repositories build against.
 
-Current release: **v0.4.0** (database migration head `0008`). Nodes of any earlier version keep
+Current release: **v0.4.1** (database migration head `0008`). Nodes of any earlier version keep
 working for ping; TCP, HTTP and traceroute need node v0.3.0 or newer, DNS checks need node v0.4.0.
 
 | Repository | Role |
@@ -287,8 +287,9 @@ works too) and a result gains two things, neither of which changes the estimate:
   node with a verified position took part. Anycast addresses are the usual cause of a ruled-out place:
   a database names one city for an address that answers from many.
 
-The databases are read from disk and picked up again when a file changes (no restart after the monthly
-update), and nothing is fetched while serving a request. DB-IP Lite is licensed CC BY 4.0 and the result
+The databases are read from disk; a directory is looked at again every few seconds, so a first download after the
+server started, and a newer file each month, are picked up without a restart, and nothing is fetched while serving a
+request. DB-IP Lite is licensed CC BY 4.0 and the result
 carries the attribution it asks for. Geofeeds (RFC 8805) are not used.
 
 Anycast addresses, CDN edges and VPN endpoints are located where they answer from, not where their
@@ -367,7 +368,7 @@ first because the application release pins it.
 
 | Release | Database head | Notes |
 |---|---|---|
-| v0.4.0 | `0008` | DNS checks (`dns` is enabled for deployments that had every kind on); GeoIP / ASN cross-check; watches; API keys and the text endpoint |
+| v0.4.1, v0.4.0 | `0008` | DNS checks (`dns` is enabled for deployments that had every kind on); GeoIP / ASN cross-check; watches; API keys and the text endpoint |
 | v0.3.0 | `0005` | TCP, HTTP and traceroute; tasks sent again when their instance dies; calibrated location model |
 | v0.2.0 | `0002` | estimated location; signed releases |
 | v0.1.0 | `0001` | first release |
@@ -387,7 +388,7 @@ Small steps, each one committed and logged in [CHANGELOG.md](CHANGELOG.md).
 - [x] Dockerfile, CI (lint, types, tests, contract-drift check) and Docker Hub publishing
 - [x] API tests also run on PostgreSQL
 - [x] Release workflow: tag or manual run, dry run, version check, image + wheel + lock + contracts
-- [x] Tagged releases: v0.1.0, v0.2.0, v0.3.0, v0.4.0
+- [x] Tagged releases: v0.1.0, v0.2.0, v0.3.0, v0.4.0, v0.4.1
 - [x] More than one backend process or host (shared presence, owner-sends dispatch, reaper)
 - [ ] Per-session / per-IP quota tuning from real traffic
 - [x] TCP, HTTP and traceroute (protocol, planning, validation, tests; node and frontend shipped in v0.3.0)

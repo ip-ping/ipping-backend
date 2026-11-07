@@ -162,9 +162,19 @@ class WatchScheduler:
             watch.last_run_at, watch.last_status = now, assessment.status
             watch.bad_streak, watch.alerting = streak.bad_streak, streak.alerting
             alert: Alert | None = None
-            if streak.event is not None:
+            event = streak.event
+            if (
+                event is None
+                and streak.alerting
+                and watch.last_alert_error is not None
+                and assessment.status in ("degraded", "down")
+            ):
+                # The alert for this outage never arrived (the address was down, or wrong): try again
+                # on each bad run until it does, rather than leave the administrator in the dark.
+                event = "alert"
+            if event is not None:
                 alert = make_alert(
-                    streak.event, watch.id, watch.name, watch.kind, watch.target, assessment.status,
+                    event, watch.id, watch.name, watch.kind, watch.target, assessment.status,
                     assessment.nodes_ok, assessment.nodes_total, assessment.median_ms, measurement_id,
                 )  # fmt: skip
             url, fmt, watch_id = watch.alert_url, watch.alert_format, watch.id

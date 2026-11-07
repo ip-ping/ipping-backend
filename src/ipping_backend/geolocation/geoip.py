@@ -15,6 +15,7 @@ from __future__ import annotations
 import ipaddress
 import logging
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,9 @@ import maxminddb
 from .estimate import KM_PER_RTT_MS_HARD, TOLERANCE_KM, haversine_km
 
 log = logging.getLogger(__name__)
+
+# How often a directory is looked at again for new or newer database files.
+SCAN_EVERY_S = 10.0
 
 ATTRIBUTIONS = {
     "dbip": "IP geolocation by DB-IP (db-ip.com), licensed CC BY 4.0",
@@ -104,37 +108,85 @@ class _Database:
 
 
 class GeoIp:
-    """The configured databases (either, both or neither)."""
+    """The configured databases (either, both or neither).
 
-    def __init__(self, city: Path | None = None, asn: Path | None = None) -> None:
-        self._city = _Database(city) if city else None
-        self._asn = _Database(asn) if asn else None
-        self._flavour = (
-            "dbip" if any("dbip" in str(p).lower() for p in (city, asn) if p) else "maxmind"
-        )
+    With a directory, the newest `*city*.mmdb` and `*asn*.mmdb` in it are used, and the directory is looked at
+    again from time to time: a first download after the server started is found without a restart, and so is a
+    newer file. An explicit path is fixed.
+    """
+
+    def __init__(
+        self,
+        city: Path | None = None,
+        asn: Path | None = None,
+        *,
+        directory: Path | None = None,
+        scan_every_s: float = SCAN_EVERY_S,
+    ) -> None:
+        self._dir = directory
+        self._scan_every_s = scan_every_s
+        self._patterns = {"city": "*city*.mmdb", "asn": "*asn*.mmdb"}
+        self._fixed: dict[str, _Database | None] = {
+            "city": _Database(city) if city else None,
+            "asn": _Database(asn) if asn else None,
+        }
+        self._found: dict[str, _Database | None] = {"city": None, "asn": None}
+        self._next_scan = {"city": 0.0, "asn": 0.0}
+        self._lock = threading.Lock()
 
     @classmethod
     def from_settings(cls, directory: str | None, city: str | None, asn: str | None) -> GeoIp:
-        """Explicit paths win; otherwise the newest `*city*.mmdb` / `*asn*.mmdb` in the directory."""
-
-        def newest(pattern: str) -> Path | None:
-            if not directory:
-                return None
-            found = sorted(Path(directory).glob(pattern), key=lambda p: p.stat().st_mtime)
-            return found[-1] if found else None
-
+        """Explicit paths win; otherwise the newest files in the directory."""
         return cls(
-            Path(city) if city else newest("*city*.mmdb"),
-            Path(asn) if asn else newest("*asn*.mmdb"),
+            Path(city) if city else None,
+            Path(asn) if asn else None,
+            directory=Path(directory) if directory else None,
         )
+
+    def _database(self, kind: str) -> _Database | None:
+        fixed = self._fixed[kind]
+        if fixed is not None or self._dir is None:
+            return fixed
+        now = time.monotonic()
+        with self._lock:
+            if now >= self._next_scan[kind]:
+                self._next_scan[kind] = now + self._scan_every_s
+                try:
+                    found = sorted(
+                        self._dir.glob(self._patterns[kind]), key=lambda p: p.stat().st_mtime
+                    )
+                except OSError:
+                    found = []
+                newest = found[-1] if found else None
+                current = self._found[kind]
+                if newest is None:
+                    self._found[kind] = None
+                elif current is None or current.path != newest:
+                    self._found[kind] = _Database(newest)
+            return self._found[kind]
+
+    @property
+    def _city(self) -> _Database | None:
+        return self._database("city")
+
+    @property
+    def _asn(self) -> _Database | None:
+        return self._database("asn")
 
     @property
     def has_city(self) -> bool:
-        return self._city is not None and self._city.path.exists()
+        db = self._city
+        return db is not None and db.path.exists()
 
     @property
     def has_asn(self) -> bool:
-        return self._asn is not None and self._asn.path.exists()
+        db = self._asn
+        return db is not None and db.path.exists()
+
+    @property
+    def _flavour(self) -> str:
+        names = [str(db.path).lower() for db in (self._city, self._asn) if db is not None]
+        return "dbip" if any("dbip" in n for n in names) else "maxmind"
 
     @property
     def attribution(self) -> str | None:
@@ -145,7 +197,8 @@ class GeoIp:
         return "DB-IP Lite" if self._flavour == "dbip" else "MaxMind GeoLite2"
 
     def place(self, ip: str) -> GeoPlace | None:
-        record = self._city.get(ip) if self._city else None
+        database = self._city
+        record = database.get(ip) if database else None
         if not record:
             return None
         location = record.get("location") or {}
@@ -163,7 +216,8 @@ class GeoIp:
         )
 
     def asn(self, ip: str) -> AsnInfo | None:
-        record = self._asn.get(ip) if self._asn else None
+        database = self._asn
+        record = database.get(ip) if database else None
         if not record or not record.get("autonomous_system_number"):
             return None
         return AsnInfo(

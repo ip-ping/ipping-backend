@@ -2,6 +2,26 @@
 
 Progress log for `ipping-backend`, newest first. Each entry is one small, tested step.
 
+## v0.4.1 (2026-11-07)
+
+Two defects found by installing the released v0.4.0 on a fresh Debian 13 and in a Docker stack, and using it.
+
+### fix: GeoIP databases downloaded after the server started were not noticed
+- The directory was looked at only when the server started, so `ipping-backend geoip-update` into the running
+  stack's volume (what the Docker installer does) downloaded the databases and the admin page still said none
+  were loaded until a restart; only a file that was *replaced* was picked up. The directory is now scanned again
+  every 10 seconds (when a lookup is made), so a first download and each month's newer file are found without a
+  restart, as the README said. Tested: files that appear after construction, a newer file replacing an older, and
+  that the scan is not repeated on every lookup.
+
+### fix: an alert that did not arrive was never tried again
+- If the webhook or ntfy server was down at the moment an outage began, the delivery failed, the failure was
+  recorded on the watch, and the watch then counted as "alerted": later bad runs sent nothing, so the administrator
+  could stay unaware of an outage that was still going on. A failed alert is now sent again on each following bad
+  run until it is delivered, once, and not again for the same outage. (A failed "it is back" message is still not
+  retried.) Tested with a webhook that is down at the first run and up at the second. Seen on the real stack: a
+  watch created before its listener was running.
+
 ## v0.4.0 (2026-11-07)
 
 ### feat: DNS checks, a GeoIP cross-check, watches, API keys

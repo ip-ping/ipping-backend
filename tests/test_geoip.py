@@ -94,6 +94,29 @@ def test_a_replaced_file_is_picked_up_without_a_restart(tmp_path: Path) -> None:
     assert geoip.place(TARGET).name == "Amsterdam"  # type: ignore[union-attr]
 
 
+def test_databases_that_appear_after_the_server_started_are_found(tmp_path: Path) -> None:
+    """The installer downloads them into a running server's directory: no restart should be needed."""
+    geoip = GeoIp.from_settings(str(tmp_path), None, None)
+    assert not geoip.has_city and not geoip.has_asn and geoip.place(TARGET) is None
+    city_db(tmp_path / "dbip-city-lite-2026-11.mmdb", TOKYO)
+    asn_db(tmp_path / "dbip-asn-lite-2026-11.mmdb")
+    fast = GeoIp(directory=tmp_path, scan_every_s=0)  # a scan on every lookup, for the test
+    assert fast.has_city and fast.has_asn
+    assert fast.place(TARGET).name == "Tokyo"  # type: ignore[union-attr]
+    # and a newer month's file replaces them
+    newer = city_db(tmp_path / "dbip-city-lite-2026-12.mmdb", AMSTERDAM)
+    os.utime(newer, ns=(2_000_000_000_000_000_000, 2_000_000_000_000_000_000))
+    assert fast.place(TARGET).name == "Amsterdam"  # type: ignore[union-attr]
+
+
+def test_the_directory_is_not_scanned_on_every_lookup(tmp_path: Path) -> None:
+    geoip = GeoIp.from_settings(str(tmp_path), None, None)
+    assert geoip.place(TARGET) is None
+    city_db(tmp_path / "dbip-city-lite.mmdb", TOKYO)
+    # ten seconds have not passed: the scan that found nothing is not repeated yet
+    assert geoip.place(TARGET) is None
+
+
 def test_a_directory_uses_the_newest_files_in_it(tmp_path: Path) -> None:
     old = city_db(tmp_path / "dbip-city-lite-2026-10.mmdb", AMSTERDAM)
     os.utime(old, (1_000_000_000, 1_000_000_000))

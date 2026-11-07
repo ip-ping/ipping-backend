@@ -511,6 +511,45 @@ def test_an_alert_that_cannot_be_delivered_is_recorded_not_lost(api: Api) -> Non
         ws.__exit__(None, None, None)
 
 
+def test_an_alert_that_did_not_arrive_is_tried_again_until_it_does(api: Api) -> None:
+    sent: list[dict[str, Any]] = []
+    up = {"value": False}
+
+    def hook(request: httpx.Request) -> httpx.Response:
+        if not up["value"]:
+            return httpx.Response(503)  # the webhook is down at the moment of the outage
+        sent.append(json.loads(request.content))
+        return httpx.Response(200)
+
+    _scheduler(api)._transport = httpx.MockTransport(hook)  # noqa: SLF001
+    _scheduler(api)._resolver = fake_resolver  # noqa: SLF001
+    api.become_admin()
+    _, credential = api.enroll_node()
+    ws, session = connect(api, credential, kinds=KINDS)
+    try:
+        watch_id = api.post(
+            BASE, _body(count=1, alert_after=1, alert_url="https://example.com/hook")
+        ).json()["id"]
+
+        def bad_run(expect_runs: int) -> None:
+            assert api.post(f"{BASE}/{watch_id}/run").status_code == 202
+            _answer(session, good=False)
+            _wait(lambda: len(_watch(api, watch_id)["history"]) == expect_runs)
+
+        bad_run(1)
+        _wait(lambda: _watch(api, watch_id)["last_alert_error"] is not None)
+        assert sent == [] and _watch(api, watch_id)["alerting"] is True
+        up["value"] = True
+        bad_run(2)  # the next bad run tries again, and this time it arrives
+        _wait(lambda: len(sent) == 1)
+        assert sent[0]["event"] == "alert"
+        _wait(lambda: _watch(api, watch_id)["last_alert_error"] is None)
+        bad_run(3)
+        assert len(sent) == 1, "once delivered it is not sent again for the same outage"
+    finally:
+        ws.__exit__(None, None, None)
+
+
 def test_the_test_alert_reports_whether_it_arrived(api: Api) -> None:
     received: list[dict[str, Any]] = []
 
