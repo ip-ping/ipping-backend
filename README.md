@@ -8,8 +8,8 @@ This repository is the coordinator. It validates targets, schedules work onto no
 aggregates results, estimates where an address appears to be, and owns the contracts the other two
 repositories build against.
 
-Current release: **v0.3.0** (database migration head `0005`). Nodes of any earlier version keep
-working for ping; the new kinds need node v0.3.0 or newer.
+Current release: **v0.4.0** (database migration head `0008`). Nodes of any earlier version keep
+working for ping; TCP, HTTP and traceroute need node v0.3.0 or newer, DNS checks need node v0.4.0.
 
 | Repository | Role |
 |---|---|
@@ -387,7 +387,7 @@ Small steps, each one committed and logged in [CHANGELOG.md](CHANGELOG.md).
 - [x] Dockerfile, CI (lint, types, tests, contract-drift check) and Docker Hub publishing
 - [x] API tests also run on PostgreSQL
 - [x] Release workflow: tag or manual run, dry run, version check, image + wheel + lock + contracts
-- [x] Tagged releases: v0.1.0, v0.2.0, v0.3.0
+- [x] Tagged releases: v0.1.0, v0.2.0, v0.3.0, v0.4.0
 - [x] More than one backend process or host (shared presence, owner-sends dispatch, reaper)
 - [ ] Per-session / per-IP quota tuning from real traffic
 - [x] TCP, HTTP and traceroute (protocol, planning, validation, tests; node and frontend shipped in v0.3.0)

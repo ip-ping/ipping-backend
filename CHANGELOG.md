@@ -2,7 +2,14 @@
 
 Progress log for `ipping-backend`, newest first. Each entry is one small, tested step.
 
-## Unreleased
+## v0.4.0 (2026-11-07)
+
+### feat: DNS checks, a GeoIP cross-check, watches, API keys
+Five things, newest first below: a place for the GeoIP databases in the image, API keys with their own quotas and
+a plain-text endpoint, **watches** (scheduled checks with quiet, address-safe alerts, safe with several
+instances), an optional **GeoIP / ASN database** that is checked against the measurements, and the **`dns`
+kind** (needs node v0.4.0). Database migrations `0006` to `0008`; `httpx` and `maxminddb` are now dependencies.
+
 
 ### 2026-11-07: the image has a place for the GeoIP databases
 - The container image creates `/data/geoip` (owned by the service user) and sets `IPPING_GEOIP_DIR` to it, so a
