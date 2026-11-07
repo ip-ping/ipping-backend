@@ -1,10 +1,15 @@
 # ipping-backend
 
 Python API for **ipping**, a self-hostable distributed network diagnostics service: a user enters an
-IP address, hostname or URL, every online node pings it, and the results stream back live.
+IP address, hostname or URL, every online node runs a **ping, TCP connect, HTTP request or
+traceroute** against it, and the results stream back live.
 
 This repository is the coordinator. It validates targets, schedules work onto nodes, stores and
-aggregates results, and owns the contracts the other two repositories build against.
+aggregates results, estimates where an address appears to be, and owns the contracts the other two
+repositories build against.
+
+Current release: **v0.3.0** (database migration head `0005`). Nodes of any earlier version keep
+working for ping; the new kinds need node v0.3.0 or newer.
 
 | Repository | Role |
 |---|---|
@@ -15,7 +20,7 @@ aggregates results, and owns the contracts the other two repositories build agai
 ## How it works
 
 ```text
-browser --HTTP/SSE--> backend --WebSocket (opened by the node)--> node --ICMP--> target
+browser --HTTP/SSE--> backend --WebSocket (opened by the node)--> node --ping/TCP/HTTP/traceroute--> target
                         |
                     PostgreSQL
 ```
@@ -23,13 +28,20 @@ browser --HTTP/SSE--> backend --WebSocket (opened by the node)--> node --ICMP-->
 * **Nodes dial out.** Each node opens an authenticated WebSocket to the backend, so a node host
   needs no inbound port. Credentials travel in the `Authorization` header, never in the URL.
 * **Work is durable.** A measurement and its per-node tasks are written to the database *before*
-  anything is sent. After a restart, unfinished measurements are closed as `interrupted` instead
-  of vanishing.
+  anything is sent. After a restart, tasks whose node had not produced anything are sent again
+  and the rest are closed as `interrupted` with what they had, instead of vanishing.
 * **Live results.** `GET /api/v1/measurements/{id}/events` is Server-Sent Events. Event ids are
   sequence numbers; reconnecting with `Last-Event-ID` replays what was missed.
 * **Offline is not packet loss.** A node that disconnects or misses the deadline ends its task as
-  `node_disconnected` / `timed_out`. Only echo requests that were actually sent can be "lost".
+  `node_disconnected` / `timed_out`. Only probes that were actually sent can be "lost".
 * **Nodes receive typed tasks, never commands.** See `contracts/node-protocol-v1.schema.json`.
+  Protocol v1 has stayed v1 while growing (new task kinds, `port`, `server_name`, per-sample
+  `detail`): changes are additive, unknown fields are ignored, and a node only gets kinds it
+  advertised in its hello.
+* **Everything from a node is untrusted.** A sample's `detail` (an HTTP response's timings and
+  certificate, a traceroute hop) is parsed against a model for its kind, size-limited, stripped of
+  control characters and dropped if it does not fit; a traceroute hop that is not a public address
+  is stored as "a private hop" with no address.
 
 ## Run it locally
 
@@ -47,9 +59,9 @@ On the first start with no administrator, a one-time setup token is printed to t
 `IPPING_SETUP_TOKEN`). Open the frontend's `/setup` page and use it to create the admin account.
 
 ```bash
-uv run pytest            # 104 tests (SQLite)
-IPPING_TEST_DATABASE_URL=postgresql://user:pass@localhost/test uv run pytest tests/test_api.py  # PostgreSQL
-uv run ruff check . && uv run mypy
+uv run pytest            # 175 tests on SQLite (the multi-instance ones are skipped)
+IPPING_TEST_DATABASE_URL=postgresql://user:pass@localhost/test uv run pytest   # all 187 on PostgreSQL
+uv run ruff check . && uv run ruff format --check . && uv run mypy
 uv run python scripts/export_contracts.py   # regenerate contracts/ after changing the API
 ```
 
@@ -75,15 +87,39 @@ bring up the backend together with the frontend, database and reverse proxy.
 | `IPPING_SETUP_TOKEN` | generated at startup | Gate for creating the first administrator |
 | `IPPING_PUBLIC_URL` | unset | Public origin, used for the same-origin check on writes |
 | `IPPING_COOKIE_SECURE` | `true` | Set `false` only when serving plain HTTP |
+| `IPPING_ALLOWED_ORIGINS` | none | Extra origins allowed for browser writes (a JSON list) |
+| `IPPING_LOG_LEVEL` / `IPPING_LOG_JSON` | `INFO` / `true` | Logging |
 | `IPPING_HOST` / `IPPING_PORT` | `127.0.0.1` / `8000` | Bind address |
 | `IPPING_WORKERS` | `1` | Backend processes (more than one needs PostgreSQL) |
+| `IPPING_INSTANCE_HEARTBEAT_S` | `3` | How often an instance proves it is alive |
+| `IPPING_REAPER_INTERVAL_S` / `IPPING_DISPATCH_POLL_S` | `1` / `1` | How often deadlines are checked and pending tasks are looked for (notifications make both faster) |
 | `IPPING_INSTANCE_DEAD_AFTER_S` | `10` | How long without a heartbeat before an instance counts as dead |
 | `IPPING_PENDING_GRACE_S` | `5` | How long a task waits for a node that is not connected before it is given up on |
 | `FORWARDED_ALLOW_IPS` | `127.0.0.1` | Reverse proxies whose `X-Forwarded-*` headers are trusted |
 
-Limits that an operator may need to change while running (emergency stop, per-user and global
-probe budgets, target denylist, retention, enabled kinds, allowed ports, task retries) live in the database and are edited through
-`PATCH /api/v1/admin/settings`.
+Limits that an operator may need to change while running live in the database and are edited
+through `PATCH /api/v1/admin/settings` (or the admin page): the emergency stop
+(`measurements_enabled`), per-visitor and per-IP concurrency, creations per minute, probe budgets
+(`max_probes_per_measurement`, `max_global_inflight_probes`), the deadline, default and maximum
+counts, the target denylist, retention, `enabled_kinds`, `allowed_ports` (for TCP and HTTP),
+`max_redirects`, `traceroute_max_hops` and `task_retries`.
+
+## API at a glance
+
+Interactive docs are at `/api/docs`; the machine-readable contract is `contracts/openapi.json`.
+
+| | |
+|---|---|
+| `GET /api/v1/session` | start a browser session and get its CSRF token (writes send it as `X-CSRF-Token`) |
+| `POST /api/v1/measurements` | start one: `{"target": "example.com:443", "kind": "tcp", "count": 4}`; `kind` is `ping`, `tcp`, `http` or `traceroute`; also `port`, `follow_redirects`, `dns_mode` (`fixed` / `regional`), `family`, `node_ids`, `countries` |
+| `GET /api/v1/measurements/{id}` | the measurement with its tasks, samples (`http` or `hop` details) and summaries |
+| `GET /api/v1/measurements/{id}/events` | live Server-Sent Events, resumable with `Last-Event-ID` |
+| `GET /api/v1/measurements/{id}/location` | the estimated location (ping and TCP) |
+| `POST /api/v1/measurements/{id}/cancel`, `.../share` | cancel; make the link public |
+| `GET /api/v1/nodes` | the approved nodes, whether each is online, and the kinds it can run |
+| `POST /api/v1/nodes/enroll`, `WS /api/v1/nodes/connect` | what a node uses |
+| `/api/v1/admin/...` | nodes (approve, revoke, rotate credential), enrollment tokens, settings, audit, status |
+| `GET /api/v1/health/live`, `/ready` | liveness and readiness |
 
 ## Kinds of measurement
 
@@ -93,6 +129,12 @@ probe budgets, target denylist, retention, enabled kinds, allowed ports, task re
 | `tcp` | opening a TCP connection | needs a port (`host:port`, or `port`) from the allowed list; `count` 1 to 10; a refusal keeps its time but is not a success |
 | `http` | one request | scheme, port and path come from the URL (query strings are dropped); `follow_redirects` to follow up to 5; timings, status, certificate |
 | `traceroute` | one hop | up to 30 hops, three probes each; non-public hops are shown as private; Linux nodes only |
+
+Each sample is one probe: for `ping` and `tcp` the round trip (a refused TCP connection is an `error`
+sample that keeps its time), for `http` the whole request with `detail` (`status_code`, DNS /
+connect / TLS / first-byte / total microseconds, server, redirects, `tls` certificate info), and for
+`traceroute` one hop (`ttl`, public `ip` or `private`, round trips, `reached`). The probe budget
+counts nodes times probes (an HTTP check counts 2, a traceroute counts its hop limit).
 
 Which kinds a node can run is part of its hello (`capabilities.kinds`); a measurement only goes to
 nodes that can run it, and asking for a kind none of the online nodes supports says so. Administrators
@@ -205,15 +247,21 @@ Each instance keeps its own database pool (up to 20 connections) and one `LISTEN
 size PostgreSQL's `max_connections` for roughly 21 per instance.
 
 Tested with real processes: three workers, six real nodes spread across them, every measurement
-completing on all nodes whichever worker created it, and the worker holding four nodes killed
-mid-measurement (the measurement settled as `interrupted` with exactly those four tasks, the other
-two completed, and all nodes reconnected). The two-instance behaviour is covered by
-`tests/test_cluster.py`.
+completing on all nodes whichever worker created it, and a worker holding nodes killed
+mid-measurement. Where its tasks had already produced samples the measurement settled as
+`interrupted` with exactly those tasks (the others completed, all nodes reconnected). Where they had
+not (a TCP check to a port that drops packets), the three tasks were sent again to the reconnected
+nodes and the measurement completed in 13.6 s with all six, `attempts` 2 on the three that had been
+on the dead worker. The two-instance behaviour is covered by `tests/test_cluster.py`.
 
 ## Known limits
 
 * Traceroute needs Linux on the node (it uses the kernel's ICMP error queue).
 * A TCP or HTTP check connects to a destination the user chose, from the node's address, on the allowed ports only. Nodes should not be on networks where that is unwelcome.
+* Public IPv6 has not been tested end to end (the development machine has no IPv6 internet); IPv6
+  targets, IPv6 loopback and an IPv6 traceroute through network namespaces were.
+* The location estimate is only as good as the nodes' coordinates and how close the nearest node is
+  (see the table above); it is not a geolocation database and uses no GeoIP data.
 * A task is sent again (once, `task_retries`) only when its backend instance died and the node had
   produced nothing yet. Once a node has produced samples a crash means `interrupted` with the
   partial results kept, because starting over would discard them. A node that drops is never
@@ -223,9 +271,20 @@ two completed, and all nodes reconnected). The two-instance behaviour is covered
 
 Tags are `vX.Y.Z` and must match `pyproject.toml`. A release publishes the versioned image, the
 wheel, a hash-locked `requirements.lock` (used by the central installer's direct mode), the API and
-protocol contracts, and `SHA256SUMS`. Releasing is described in
+protocol contracts, and `SHA256SUMS`, with signed build-provenance attestations
+(`gh attestation verify`). Releasing is described in
 [RELEASING.md](https://github.com/ip-ping/ipping/blob/main/RELEASING.md); the backend is released
 first because the application release pins it.
+
+| Release | Database head | Notes |
+|---|---|---|
+| v0.3.0 | `0005` | TCP, HTTP and traceroute; tasks sent again when their instance dies; calibrated location model |
+| v0.2.0 | `0002` | estimated location; signed releases |
+| v0.1.0 | `0001` | first release |
+
+Migrations run as an explicit step (`ipping-backend migrate`); the installer backs the database up
+first. Upgrading from v0.2.0 was tested for real, including a v0.2.0 node connecting to the newer
+backend and running a ping.
 
 ## Roadmap
 
@@ -238,12 +297,13 @@ Small steps, each one committed and logged in [CHANGELOG.md](CHANGELOG.md).
 - [x] Dockerfile, CI (lint, types, tests, contract-drift check) and Docker Hub publishing
 - [x] API tests also run on PostgreSQL
 - [x] Release workflow: tag or manual run, dry run, version check, image + wheel + lock + contracts
-- [x] First tagged release: v0.1.0
+- [x] Tagged releases: v0.1.0, v0.2.0, v0.3.0
 - [x] More than one backend process or host (shared presence, owner-sends dispatch, reaper)
 - [ ] Per-session / per-IP quota tuning from real traffic
-- [x] TCP, HTTP and traceroute: backend side (protocol, planning, validation, tests)
-- [ ] TCP, HTTP and traceroute: node side and frontend
+- [x] TCP, HTTP and traceroute (protocol, planning, validation, tests; node and frontend shipped in v0.3.0)
+- [x] Tasks sent again when their backend instance dies before the node produced anything
 - [ ] DNS comparison across nodes
+- [ ] Public IPv6 verified end to end (needs a test host with IPv6 internet)
 - [x] Estimated network location: constraint-based, evidence listed, explicit "insufficient evidence"
 - [x] Calibrate the location model against real targets of known location (RIPE Atlas anchors; held-out half reported)
 - [ ] Optionally add GeoIP / ASN / geofeed evidence to the location estimate

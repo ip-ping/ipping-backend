@@ -4,6 +4,15 @@ Progress log for `ipping-backend`, newest first. Each entry is one small, tested
 
 ## Unreleased
 
+### 2026-11-07: README brought up to date
+- The README now covers all four kinds in the intro and diagram, the additive protocol and the rule
+  that everything from a node is untrusted, the complete configuration and runtime settings, an
+  overview of the API (including the `POST /measurements` body), what a sample is for each kind and how
+  the probe budget counts, the crash test including the retried tasks, the known limits (public IPv6
+  untested, no GeoIP), a release table with the migration head of each release and the upgrade that
+  was tested, and a roadmap that matches v0.3.0. Test counts are current (175 on SQLite, 187 on
+  PostgreSQL).
+
 ## v0.3.0 (2026-11-06)
 
 TCP, HTTP and traceroute measurements; tasks sent again when a backend instance dies; a location model
