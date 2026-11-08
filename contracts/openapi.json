@@ -643,13 +643,14 @@
           },
           "kind": {
             "default": "ping",
-            "description": "ping: ICMP echo. tcp: time to open a TCP connection to `port`. http: one request, with timings and the TLS certificate. traceroute: the routers on the way. dns: ask each node's resolver (or a public one) about a name and compare the answers.",
+            "description": "ping: ICMP echo. tcp: time to open a TCP connection to `port`. http: one request, with timings and the TLS certificate. traceroute: the routers on the way. dns: ask each node's resolver (or a public one) about a name and compare the answers. tls: a TLS handshake with no request after it, and what the certificate says.",
             "enum": [
               "ping",
               "tcp",
               "http",
               "traceroute",
-              "dns"
+              "dns",
+              "tls"
             ],
             "title": "Kind",
             "type": "string"
@@ -681,7 +682,7 @@
                 "type": "null"
               }
             ],
-            "description": "Destination port of a tcp check. For tcp it can also be given as host:port or in a URL. An http check takes its port from the URL.",
+            "description": "Destination port of a tcp or tls check. It can also be given as host:port or in a URL. An http check takes its port from the URL.",
             "title": "Port"
           },
           "record_type": {
@@ -2872,6 +2873,17 @@
             ],
             "title": "Status",
             "type": "string"
+          },
+          "tls": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TlsDetail"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "tls: the certificate and the handshake"
           }
         },
         "required": [
@@ -3242,6 +3254,95 @@
           "ok"
         ],
         "title": "TestAlertOut",
+        "type": "object"
+      },
+      "TlsDetail": {
+        "description": "What one certificate check found: a TLS handshake with no request after it. Times are\nmicroseconds, measured on the node.\n\n`tls` is the same record an HTTP check carries (version, cipher, subject, issuer, validity, whether\nthis node trusts the certificate and why not). `names` are the names the certificate is valid for\nand `chain` is how many certificates the server sent. A certificate that is not trusted still\ncomes with all of it: the point of the check is to see what is wrong.",
+        "properties": {
+          "chain": {
+            "anyOf": [
+              {
+                "maximum": 32.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chain"
+          },
+          "connect_us": {
+            "anyOf": [
+              {
+                "maximum": 60000000.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Connect Us"
+          },
+          "names": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 24,
+            "title": "Names",
+            "type": "array"
+          },
+          "server_name": {
+            "anyOf": [
+              {
+                "maxLength": 253,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Server Name"
+          },
+          "tls": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TlsInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "tls_us": {
+            "anyOf": [
+              {
+                "maximum": 60000000.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tls Us"
+          },
+          "total_us": {
+            "anyOf": [
+              {
+                "maximum": 60000000.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Us"
+          }
+        },
+        "title": "TlsDetail",
         "type": "object"
       },
       "TlsInfo": {
@@ -3674,7 +3775,8 @@
               "tcp",
               "http",
               "traceroute",
-              "dns"
+              "dns",
+              "tls"
             ],
             "title": "Kind",
             "type": "string"
@@ -5909,7 +6011,8 @@
                 "tcp",
                 "http",
                 "traceroute",
-                "dns"
+                "dns",
+                "tls"
               ],
               "title": "Kind",
               "type": "string"

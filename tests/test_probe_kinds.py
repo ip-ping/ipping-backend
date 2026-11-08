@@ -192,6 +192,9 @@ def test_hop_and_http_details_are_bounded_and_cleaned() -> None:
     assert protocol.parse_detail("ping", {"status_code": 200}) is None
     detail = protocol.parse_detail("http", {"status_code": 200, "server": "ngi\x1b[31mnx\n"})
     assert isinstance(detail, protocol.HttpDetail) and detail.server == "ngi?[31mnx?"
+    # a control character at the very end is still one (a regex `$` would let a final newline through)
+    ended = protocol.parse_detail("http", {"status_code": 200, "server": "nginx\n"})
+    assert isinstance(ended, protocol.HttpDetail) and ended.server == "nginx?"
 
 
 def test_a_repeated_hop_says_how_many_probes_it_got() -> None:
@@ -536,7 +539,7 @@ def test_kinds_and_ports_are_administered(api: Api) -> None:
     ws, _ = connect(api, credential, kinds=ALL_KINDS)
     try:
         settings = api.get("/api/v1/admin/settings").json()
-        assert set(settings["enabled_kinds"]) == {*ALL_KINDS, "dns"}
+        assert set(settings["enabled_kinds"]) == {*ALL_KINDS, "dns", "tls"}
         assert 443 in settings["allowed_ports"]
 
         bad = api.patch("/api/v1/admin/settings", {"enabled_kinds": ["ping", "scan"]})

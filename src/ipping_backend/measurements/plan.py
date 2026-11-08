@@ -17,6 +17,7 @@ INTERVAL_MS = 1000
 PING_TIMEOUT_MS = 2000
 TCP_TIMEOUT_MS = 3000
 HTTP_TIMEOUT_MS = 10_000  # for the whole request, redirects included
+TLS_TIMEOUT_MS = 8000  # connect and handshake together
 HOP_TIMEOUT_MS = 1000
 DNS_TIMEOUT_MS = 5000
 
@@ -32,6 +33,7 @@ DNS_RESOLVERS: dict[str, str] = {
 # An HTTP check is a handful of packets and a TLS handshake: more than a ping, far less than a
 # traceroute. The unit is "one probe a node sends".
 HTTP_COST = 2
+TLS_COST = 2  # a connection and a handshake
 
 
 class PlanError(Exception):
@@ -50,7 +52,7 @@ class Plan:
 
 def sample_limit(kind: str, options: dict[str, Any]) -> int:
     """The most samples one task of this kind can produce."""
-    if kind in ("http", "dns"):
+    if kind in ("http", "dns", "tls"):
         return 1
     if kind == "traceroute":
         return int(options["max_hops"])
@@ -63,6 +65,8 @@ def probe_cost(kind: str, options: dict[str, Any]) -> int:
     a count."""
     if kind == "http":
         return HTTP_COST
+    if kind == "tls":
+        return TLS_COST
     if kind == "dns":
         return 1
     if kind == "traceroute":
@@ -91,11 +95,11 @@ def plan_measurement(
     kind = request.kind
     if kind not in settings.enabled_kinds:
         raise PlanError("kind_disabled", f"{kind} measurements are turned off on this service.")
-    if kind in ("http", "dns") and request.count is not None:
+    if kind in ("http", "dns", "tls") and request.count is not None:
         raise PlanError("invalid_option", f"A {kind} measurement does not take a count.")
     if kind != "http" and request.follow_redirects:
         raise PlanError("invalid_option", "Only an http measurement can follow redirects.")
-    if kind not in ("tcp", "http") and request.port is not None:
+    if kind not in ("tcp", "http", "tls") and request.port is not None:
         raise PlanError("invalid_option", f"A {kind} measurement does not take a port.")
     if kind != "dns" and (request.record_type is not None or request.resolver is not None):
         raise PlanError(
@@ -140,6 +144,24 @@ def plan_measurement(
             "max_redirects": redirects,
         }
         return Plan(options, port, max(deadline, HTTP_TIMEOUT_MS // 1000 + 10))
+
+    if kind == "tls":
+        # A name is presented to the server (SNI) and checked against the certificate; an address is
+        # checked as an address. The port defaults to 443 and must be one the service allows.
+        port = request.port or parsed.port or 443
+        if port not in settings.allowed_ports:
+            allowed = ", ".join(str(p) for p in settings.allowed_ports)
+            raise PlanError(
+                "port_not_allowed",
+                f"Port {port} is not allowed on this service. Allowed: {allowed}.",
+            )
+        options = {
+            "count": 1,
+            "interval_ms": INTERVAL_MS,
+            "timeout_ms": TLS_TIMEOUT_MS,
+            "port": port,
+        }
+        return Plan(options, port, max(deadline, TLS_TIMEOUT_MS // 1000 + 10))
 
     if kind == "dns":
         if parsed.ip is not None:

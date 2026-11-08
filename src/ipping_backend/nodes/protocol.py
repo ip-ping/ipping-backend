@@ -25,8 +25,8 @@ MAX_FRAME_BYTES = 64 * 1024
 # What a sample may carry besides its round trip. Bounded because it comes from a node.
 MAX_DETAIL_BYTES = 8192
 
-ProbeKind = Literal["ping", "tcp", "http", "traceroute", "dns"]
-PROBE_KINDS: tuple[str, ...] = ("ping", "tcp", "http", "traceroute", "dns")
+ProbeKind = Literal["ping", "tcp", "http", "traceroute", "dns", "tls"]
+PROBE_KINDS: tuple[str, ...] = ("ping", "tcp", "http", "traceroute", "dns", "tls")
 
 DnsRecordType = Literal["A", "AAAA", "CNAME", "MX", "NS", "TXT", "SOA"]
 DNS_RECORD_TYPES: tuple[str, ...] = ("A", "AAAA", "CNAME", "MX", "NS", "TXT", "SOA")
@@ -160,6 +160,7 @@ class TaskOptions(_Frame):
     * http: scheme, path, timeout_ms, max_redirects (one request, so no count)
     * traceroute: max_hops, timeout_ms (per hop; three probes are sent to each hop), and, to repeat
       the trace like mtr, count (rounds, default 1) and interval_ms (between rounds)
+    * tls: timeout_ms (one handshake, so no count; a port and a server name are in the target)
     * dns: record_type, resolver_ip (absent: the node's own resolvers), timeout_ms (one question,
       so no count; the name is the target's `hostname`, and the node never resolves it itself)
     """
@@ -186,7 +187,7 @@ class TaskFrame(_Frame):
 
     @model_validator(mode="after")
     def _complete_for_kind(self) -> TaskFrame:
-        if self.kind in ("tcp", "http") and self.target.port is None:
+        if self.kind in ("tcp", "http", "tls") and self.target.port is None:
             raise ValueError(f"a {self.kind} task needs a port")
         if self.kind == "http" and (self.options.scheme is None or self.options.path is None):
             raise ValueError("an http task needs a scheme and a path")
@@ -266,7 +267,8 @@ SAMPLE_ERROR_CODES = {
 # node can never put more than this into a stored result.
 # --------------------------------------------------------------------------------------------
 
-_PRINTABLE = re.compile(r"^[\x20-\x7e]*$")
+# `\Z`, not `$`: `$` also matches just before a trailing newline, which would let one through.
+_PRINTABLE = re.compile(r"[\x20-\x7e]*\Z")
 
 
 def _printable(value: str | None) -> str | None:
@@ -289,6 +291,35 @@ class TlsInfo(_Frame):
     @classmethod
     def _clean(cls, value: str | None) -> str | None:
         return _printable(value)
+
+
+class TlsDetail(_Frame):
+    """What one certificate check found: a TLS handshake with no request after it. Times are
+    microseconds, measured on the node.
+
+    `tls` is the same record an HTTP check carries (version, cipher, subject, issuer, validity, whether
+    this node trusts the certificate and why not). `names` are the names the certificate is valid for
+    and `chain` is how many certificates the server sent. A certificate that is not trusted still
+    comes with all of it: the point of the check is to see what is wrong.
+    """
+
+    server_name: str | None = Field(default=None, max_length=253)
+    connect_us: int | None = Field(default=None, ge=0, le=60_000_000)
+    tls_us: int | None = Field(default=None, ge=0, le=60_000_000)
+    total_us: int | None = Field(default=None, ge=0, le=60_000_000)
+    tls: TlsInfo | None = None
+    names: list[str] = Field(default_factory=list, max_length=24)
+    chain: int | None = Field(default=None, ge=0, le=32)
+
+    @field_validator("server_name")
+    @classmethod
+    def _clean_name(cls, value: str | None) -> str | None:
+        return _printable(value)
+
+    @field_validator("names")
+    @classmethod
+    def _clean_names(cls, value: list[str]) -> list[str]:
+        return [(_printable(name) or "")[:255] for name in value]
 
 
 class RedirectHop(_Frame):
@@ -427,6 +458,8 @@ def parse_detail(kind: str, detail: dict[str, Any] | None) -> BaseModel | None:
             return HopDetail.model_validate(detail)
         if kind == "dns":
             return DnsDetail.model_validate(detail)
+        if kind == "tls":
+            return TlsDetail.model_validate(detail)
     except ValueError:
         pass
     return None

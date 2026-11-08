@@ -101,6 +101,7 @@ def _sample_out(sample: Sample, kind: str = "ping") -> schemas.SampleOut:
         rtt_ms=None if sample.rtt_us is None else round(sample.rtt_us / 1000, 3),
         error_code=sample.error_code,
         http=detail if isinstance(detail, proto.HttpDetail) else None,
+        tls=detail if isinstance(detail, proto.TlsDetail) else None,
         hop=detail if isinstance(detail, proto.HopDetail) else None,
         dns=detail if isinstance(detail, proto.DnsDetail) else None,
     )
@@ -515,10 +516,15 @@ class MeasurementEngine:
             await self._maybe_finalize(tx)
 
     def _task_frame(self, task: MeasurementTask, measurement: Measurement) -> proto.TaskFrame:
-        port = measurement.options.get("port") if measurement.kind in ("tcp", "http") else None
+        port = (
+            measurement.options.get("port") if measurement.kind in ("tcp", "http", "tls") else None
+        )
         if measurement.dns_mode == "fixed":
-            # An http check connects to the pinned address but still presents the name it was given.
-            named = measurement.kind == "http" and measurement.target_host != measurement.target_ip
+            # An http or tls check connects to the pinned address but still presents the name it was
+            # given.
+            named = measurement.kind in ("http", "tls") and (
+                measurement.target_host != measurement.target_ip
+            )
             target = proto.TaskTarget(
                 ip=measurement.target_ip,
                 family=measurement.family,

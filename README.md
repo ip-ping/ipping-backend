@@ -9,7 +9,7 @@ aggregates results, estimates where an address appears to be, and owns the contr
 repositories build against.
 
 Current release: **v0.4.1** (database migration head `0008`). Nodes of any earlier version keep
-working for ping; TCP, HTTP and traceroute need node v0.3.0 or newer, DNS checks need node v0.4.0.
+working for ping; TCP, HTTP and traceroute need node v0.3.0 or newer, DNS checks need node v0.4.0, and certificate checks need the node release after it.
 
 | Repository | Role |
 |---|---|
@@ -103,7 +103,7 @@ Limits that an operator may need to change while running live in the database an
 through `PATCH /api/v1/admin/settings` (or the admin page): the emergency stop
 (`measurements_enabled`), per-visitor and per-IP concurrency, creations per minute, probe budgets
 (`max_probes_per_measurement`, `max_global_inflight_probes`), the deadline, default and maximum
-counts, the target denylist, retention, `enabled_kinds`, `allowed_ports` (for TCP and HTTP),
+counts, the target denylist, retention, `enabled_kinds`, `allowed_ports` (for TCP, HTTP and TLS),
 `max_redirects`, `traceroute_max_hops` and `task_retries`.
 
 ## API at a glance
@@ -113,7 +113,7 @@ Interactive docs are at `/api/docs`; the machine-readable contract is `contracts
 | | |
 |---|---|
 | `GET /api/v1/session` | start a browser session and get its CSRF token (writes send it as `X-CSRF-Token`) |
-| `POST /api/v1/measurements` | start one: `{"target": "example.com:443", "kind": "tcp", "count": 4}`; `kind` is `ping`, `tcp`, `http`, `traceroute` or `dns`; also `port`, `record_type` and `resolver` (dns), `follow_redirects`, `dns_mode` (`fixed` / `regional`), `family`, `node_ids`, `countries` |
+| `POST /api/v1/measurements` | start one: `{"target": "example.com:443", "kind": "tcp", "count": 4}`; `kind` is `ping`, `tcp`, `http`, `traceroute`, `dns` or `tls`; also `port` (tcp, http, tls), `record_type` and `resolver` (dns), `follow_redirects`, `dns_mode` (`fixed` / `regional`), `family`, `node_ids`, `countries` |
 | `GET /api/v1/measurements/{id}` | the measurement with its tasks, samples (`http` or `hop` details) and summaries |
 | `GET /api/v1/measurements/{id}/events` | live Server-Sent Events, resumable with `Last-Event-ID` |
 | `GET /api/v1/measurements/{id}/location` | the estimated location (ping and TCP) |
@@ -193,6 +193,7 @@ interval (at least `min_watch_interval_s`, 60 s by default), and the rules of an
 | `ping` | an ICMP echo request | `count` 1 to 10 |
 | `tcp` | opening a TCP connection | needs a port (`host:port`, or `port`) from the allowed list; `count` 1 to 10; a refusal keeps its time but is not a success |
 | `http` | one request | scheme, port and path come from the URL (query strings are dropped); `follow_redirects` to follow up to 5; timings, status, certificate |
+| `tls` | one TLS handshake with no request after it | the target is a name or an address, with a port from the allowed list (default 443; `host:port`, a URL or `port` give another); the node presents the name (SNI) and checks the certificate against the Mozilla roots. The sample carries the certificate: version, cipher, subject, issuer, validity, whether this node trusts it and why not, the names it is valid for and how many certificates the server sent. A certificate that is not trusted is an `error` (`tls_certificate_invalid`) that keeps all of that. A watch calls it good when it is trusted and has at least 14 days left, and a certificate that is valid but nearly out of time is `degraded`, not `down` |
 | `traceroute` | one hop | up to 30 hops, three probes each; `count` 1 to 10 repeats the trace like `mtr` (one more probe per hop and round, a second apart) and a hop then carries how many probes it got (`sent`) and every reply; non-public hops are shown as private; Linux nodes only (rounds need node v0.4.1 or newer) |
 | `dns` | one question to one resolver | the target is a name (an IP address or an internal name is refused); `record_type` `A` (default), `AAAA`, `CNAME`, `MX`, `NS`, `TXT` or `SOA`; `resolver` `system` (default: each node's own resolvers, what people near it get) or `cloudflare`, `google`, `quad9` (that public resolver, asked from every node). The backend never resolves the name, so a name that does not exist can be checked |
 
@@ -398,6 +399,7 @@ Small steps, each one committed and logged in [CHANGELOG.md](CHANGELOG.md).
 - [x] Scheduled checks (watches) with quiet alerts to a webhook or ntfy, safe with several instances
 - [x] DNS checks (record types, public or per-node resolvers, privacy rules; the comparison view is in the web interface)
 - [x] Traceroute in rounds like `mtr` (loss and spread per hop)
+- [x] Certificate checks (`tls`: a handshake with no request; expiry, issuer, names, trust; a watch can alert before it expires)
 - [x] The network and place of each router on a traced path (from the GeoIP databases; the route map is in the web interface)
 - [ ] Public IPv6 verified end to end (needs a test host with IPv6 internet)
 - [x] Estimated network location: constraint-based, evidence listed, explicit "insufficient evidence"

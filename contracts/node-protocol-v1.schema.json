@@ -91,7 +91,8 @@
               "tcp",
               "http",
               "traceroute",
-              "dns"
+              "dns",
+              "tls"
             ],
             "title": "Kind",
             "type": "string"
@@ -124,7 +125,7 @@
         "type": "object"
       },
       "TaskOptions": {
-        "description": "Settings of a task. Which fields matter depends on the kind:\n\n* ping: count, interval_ms, timeout_ms\n* tcp: count, interval_ms, timeout_ms (a port is in the target)\n* http: scheme, path, timeout_ms, max_redirects (one request, so no count)\n* traceroute: max_hops, timeout_ms (per hop; three probes are sent to each hop), and, to repeat\n  the trace like mtr, count (rounds, default 1) and interval_ms (between rounds)\n* dns: record_type, resolver_ip (absent: the node's own resolvers), timeout_ms (one question,\n  so no count; the name is the target's `hostname`, and the node never resolves it itself)",
+        "description": "Settings of a task. Which fields matter depends on the kind:\n\n* ping: count, interval_ms, timeout_ms\n* tcp: count, interval_ms, timeout_ms (a port is in the target)\n* http: scheme, path, timeout_ms, max_redirects (one request, so no count)\n* traceroute: max_hops, timeout_ms (per hop; three probes are sent to each hop), and, to repeat\n  the trace like mtr, count (rounds, default 1) and interval_ms (between rounds)\n* tls: timeout_ms (one handshake, so no count; a port and a server name are in the target)\n* dns: record_type, resolver_ip (absent: the node's own resolvers), timeout_ms (one question,\n  so no count; the name is the target's `hostname`, and the node never resolves it itself)",
         "properties": {
           "count": {
             "default": 1,

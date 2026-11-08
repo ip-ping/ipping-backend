@@ -8,7 +8,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
-from ..nodes.protocol import DnsDetail, DnsRecordType, HopDetail, HttpDetail, ProbeKind
+from ..nodes.protocol import DnsDetail, DnsRecordType, HopDetail, HttpDetail, ProbeKind, TlsDetail
 
 TASK_ACTIVE = ("pending", "dispatched", "running")
 TASK_TERMINAL = (
@@ -28,7 +28,8 @@ class CreateMeasurementRequest(BaseModel):
         description=(
             "ping: ICMP echo. tcp: time to open a TCP connection to `port`. http: one request, "
             "with timings and the TLS certificate. traceroute: the routers on the way. dns: ask "
-            "each node's resolver (or a public one) about a name and compare the answers."
+            "each node's resolver (or a public one) about a name and compare the answers. "
+            "tls: a TLS handshake with no request after it, and what the certificate says."
         ),
     )
     port: int | None = Field(
@@ -36,7 +37,7 @@ class CreateMeasurementRequest(BaseModel):
         ge=1,
         le=65535,
         description=(
-            "Destination port of a tcp check. For tcp it can also be given as host:port or in a "
+            "Destination port of a tcp or tls check. It can also be given as host:port or in a "
             "URL. An http check takes its port from the URL."
         ),
     )
@@ -127,6 +128,9 @@ class SampleOut(BaseModel):
     http: HttpDetail | None = Field(default=None, description="http: what the request found")
     hop: HopDetail | None = Field(default=None, description="traceroute: the router at this hop")
     dns: DnsDetail | None = Field(default=None, description="dns: what the question found")
+    tls: TlsDetail | None = Field(
+        default=None, description="tls: the certificate and the handshake"
+    )
 
 
 class TaskStateOut(BaseModel):

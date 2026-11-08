@@ -6,11 +6,18 @@ For a terminal: `curl` against the text endpoint prints this. The interface has 
 
 from __future__ import annotations
 
-from datetime import UTC
+from datetime import UTC, datetime
 
 from .schemas import MeasurementOut, TaskOut
 
-LABELS = {"ping": "Ping", "tcp": "TCP", "http": "HTTP", "traceroute": "Traceroute", "dns": "DNS"}
+LABELS = {
+    "ping": "Ping",
+    "tcp": "TCP",
+    "http": "HTTP",
+    "traceroute": "Traceroute",
+    "dns": "DNS",
+    "tls": "Certificate",
+}
 
 
 def ms(value: float | None) -> str:
@@ -33,6 +40,27 @@ def _line(kind: str, task: TaskOut, name: str) -> list[str]:
                 f"{name}  {http.status_code}  {ms(_us(http.total_us))} ms  "
                 f"(dns {ms(_us(http.dns_us))}, connect {ms(_us(http.connect_us))}, "
                 f"tls {ms(_us(http.tls_us))}, first byte {ms(_us(http.ttfb_us))})"
+            ]
+        why = (
+            "timed out"
+            if first and first.status == "timeout"
+            else (first.error_code if first and first.error_code else task.status)
+        )
+        return [f"{name}  {why}"]
+    if kind == "tls":
+        detail = first.tls if first else None
+        cert = detail.tls if detail else None
+        if detail is not None and cert is not None:
+            trust = (
+                "trusted" if cert.verified else f"NOT trusted ({cert.verify_error or 'unknown'})"
+            )
+            expiry = ""
+            if cert.not_after is not None:
+                days = (cert.not_after - datetime.now(UTC)).total_seconds() / 86400
+                when = f"in {days:.0f} days" if days >= 0 else f"{-days:.0f} days ago"
+                expiry = f"  expires {cert.not_after.astimezone(UTC):%Y-%m-%d} ({when})"
+            return [
+                f"{name}  {trust}  {cert.version or '?'}{expiry}  {ms(_us(detail.total_us))} ms"
             ]
         why = (
             "timed out"

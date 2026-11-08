@@ -44,7 +44,7 @@ def test_startup_refuses_an_unmigrated_database(tmp_path: Path) -> None:
 
     with pytest.raises(RuntimeError, match="ipping-backend migrate"):
         asyncio.run(check())
-    assert head_revision() == "0008"
+    assert head_revision() == "0009"
 
 
 def test_dns_is_enabled_for_deployments_that_never_narrowed_the_kinds(tmp_path: Path) -> None:
@@ -71,5 +71,33 @@ def test_dns_is_enabled_for_deployments_that_never_narrowed_the_kinds(tmp_path: 
 
     everything = ["ping", "tcp", "http", "traceroute"]
     assert kinds_after_upgrade(everything) == [*everything, "dns"]
+    assert kinds_after_upgrade(["ping", "tcp"]) == ["ping", "tcp"]
+    assert kinds_after_upgrade(None) is None
+
+
+def test_tls_is_enabled_for_deployments_that_never_narrowed_the_kinds(tmp_path: Path) -> None:
+    """0009 adds tls to a saved "everything on" list, and leaves a deliberate restriction alone."""
+    import json
+    import sqlite3
+
+    def kinds_after_upgrade(saved: list[str] | None) -> list[str] | None:
+        path = tmp_path / f"t{len(saved or [])}{'n' if saved is None else 's'}.db"
+        url = f"sqlite+aiosqlite:///{path}"
+        command.upgrade(alembic_config(url), "0008")
+        with sqlite3.connect(path) as conn:
+            if saved is not None:
+                conn.execute(
+                    "insert into app_settings (key, value) values ('enabled_kinds', ?)",
+                    (json.dumps(saved),),
+                )
+        command.upgrade(alembic_config(url), "0009")
+        with sqlite3.connect(path) as conn:
+            row = conn.execute(
+                "select value from app_settings where key='enabled_kinds'"
+            ).fetchone()
+        return None if row is None else json.loads(row[0])  # type: ignore[no-any-return]
+
+    everything = ["ping", "tcp", "http", "traceroute", "dns"]
+    assert kinds_after_upgrade(everything) == [*everything, "tls"]
     assert kinds_after_upgrade(["ping", "tcp"]) == ["ping", "tcp"]
     assert kinds_after_upgrade(None) is None

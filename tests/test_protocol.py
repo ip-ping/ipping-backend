@@ -66,6 +66,7 @@ def test_task_needs_exactly_one_destination() -> None:
         ("sample_hop", "traceroute"),
         ("sample_hop_private", "traceroute"),
         ("sample_hop_rounds", "traceroute"),
+        ("sample_tls", "tls"),
     ],
 )
 def test_detail_fixtures_fit_their_models(name: str, kind: str) -> None:
@@ -74,7 +75,7 @@ def test_detail_fixtures_fit_their_models(name: str, kind: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "name", ["task_tcp", "task_http", "task_traceroute", "task_traceroute_rounds"]
+    "name", ["task_tcp", "task_http", "task_traceroute", "task_traceroute_rounds", "task_tls"]
 )
 def test_task_fixtures_name_their_kind(name: str) -> None:
     frame = json.loads((CONTRACTS / "fixtures" / "backend-to-node" / f"{name}.json").read_text())
