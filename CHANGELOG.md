@@ -4,6 +4,31 @@ Progress log for `ipping-backend`, newest first. Each entry is one small, tested
 
 ## Unreleased
 
+### 2026-11-08: certificate checks
+- A new kind, `tls`: ask every node for a TLS handshake with the target (a name, presented to the server and
+  checked against the certificate, or an address) on a port from the allowed list, 443 unless another is given
+  (`host:port`, a URL or `port`). No request is sent. The sample's `tls` detail has the version, cipher, subject,
+  issuer, validity, whether the node trusts the certificate and why not, the names it is valid for (up to 24) and
+  how many certificates the server sent. A certificate that is not trusted is an `error` with
+  `tls_certificate_invalid` that keeps all of it, so a result can say what is wrong with it.
+- **Watches** judge it: good when trusted and with at least 14 days left; a certificate that is valid but nearly
+  out of time makes the run `degraded` ("the certificate expires in 9 days") rather than `down`, so the alert
+  comes before the outage; an untrusted or missing one is `down`. The run is judged with a clock that tests can set.
+- Migration `0009` adds `tls` to the saved kind list of a deployment that never narrowed it (as `0006` did for
+  `dns`); a deliberate restriction is kept. A new deployment has it from the default.
+- Probe cost 2 (a connection and a handshake, like an HTTP check), deadline from the 8 s handshake timeout, the
+  text report prints trust, version and expiry per node. Contracts regenerated; example frames `task_tls`,
+  `sample_tls` (also in the node repository) and `hello_all_kinds` brought up to date.
+- Tests: planning and ports, the detail's limits and cleaning, the watch rules, the migration, and a measurement
+  through a node (trusted, not trusted, bare address, port refused, a node that cannot do it is not asked). The
+  full suite also passes on PostgreSQL (317 tests).
+
+### fix: a control character at the end of a text field was kept
+- The cleaner for text a node sends (a server name, a certificate subject and the like) used a regular
+  expression ending in `$`, which also matches just before a final newline, so `"nginx\n"` counted as printable
+  and was stored with its newline. It now matches the whole string. Found while testing the certificate detail;
+  the existing test only had the control character in the middle.
+
 ### 2026-11-07: the network and place of each router on a path
 - `GET /api/v1/measurements/{id}/path` returns, for every public router a traceroute found, its network (ASN
   and organisation) and the place the GeoIP database gives, keyed by address, plus which databases are loaded
