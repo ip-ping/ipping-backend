@@ -37,6 +37,7 @@ REQUEST_OPTIONS = (
     "family",
     "record_type",
     "resolver",
+    "transport",
 )
 
 

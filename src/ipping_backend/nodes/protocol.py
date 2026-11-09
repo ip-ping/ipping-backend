@@ -161,7 +161,8 @@ class TaskOptions(_Frame):
     * traceroute: max_hops, timeout_ms (per hop; three probes are sent to each hop), and, to repeat
       the trace like mtr, count (rounds, default 1) and interval_ms (between rounds)
     * tls: timeout_ms (one handshake, so no count; a port and a server name are in the target)
-    * dns: record_type, resolver_ip (absent: the node's own resolvers), timeout_ms (one question,
+    * dns: record_type, resolver_ip (absent: the node's own resolvers), transport (doh: DNS over
+      HTTPS to resolver_ip, with doh_host and doh_path), timeout_ms (one question,
       so no count; the name is the target's `hostname`, and the node never resolves it itself)
     """
 
@@ -174,6 +175,11 @@ class TaskOptions(_Frame):
     max_hops: int | None = Field(default=None, ge=1, le=30)
     record_type: DnsRecordType | None = None
     resolver_ip: str | None = Field(default=None, max_length=45)
+    # dns over HTTPS: `transport` is "doh", the resolver is asked at `resolver_ip` on port 443, and the
+    # node checks its certificate for `doh_host` and asks `doh_path`.
+    transport: Literal["udp", "doh"] | None = None
+    doh_host: str | None = Field(default=None, max_length=253)
+    doh_path: str | None = Field(default=None, max_length=64)
 
 
 class TaskFrame(_Frame):
@@ -437,6 +443,8 @@ class DnsDetail(_Frame):
     rcode: str = Field(max_length=16)
     authoritative: bool = False
     via_tcp: bool = False
+    # "doh" when the question went over HTTPS; absent for plain DNS.
+    transport: Literal["doh"] | None = None
     truncated: bool = False
     answers: list[DnsAnswerRecord] = Field(default_factory=list, max_length=32)
     redacted: int = Field(default=0, ge=0, le=1000)

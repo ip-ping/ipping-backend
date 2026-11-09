@@ -67,6 +67,7 @@ def test_task_needs_exactly_one_destination() -> None:
         ("sample_hop_private", "traceroute"),
         ("sample_hop_rounds", "traceroute"),
         ("sample_tls", "tls"),
+        ("sample_dns_doh", "dns"),
     ],
 )
 def test_detail_fixtures_fit_their_models(name: str, kind: str) -> None:
@@ -75,10 +76,18 @@ def test_detail_fixtures_fit_their_models(name: str, kind: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "name", ["task_tcp", "task_http", "task_traceroute", "task_traceroute_rounds", "task_tls"]
+    "name",
+    [
+        "task_tcp",
+        "task_http",
+        "task_traceroute",
+        "task_traceroute_rounds",
+        "task_tls",
+        "task_dns_doh",
+    ],
 )
 def test_task_fixtures_name_their_kind(name: str) -> None:
     frame = json.loads((CONTRACTS / "fixtures" / "backend-to-node" / f"{name}.json").read_text())
     parsed = protocol.backend_to_node.validate_python(frame)
-    kind = name.removeprefix("task_").removesuffix("_rounds")
+    kind = name.removeprefix("task_").removesuffix("_rounds").removesuffix("_doh")
     assert isinstance(parsed, protocol.TaskFrame) and parsed.kind == kind

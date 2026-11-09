@@ -730,6 +730,22 @@
             "minLength": 1,
             "title": "Target",
             "type": "string"
+          },
+          "transport": {
+            "anyOf": [
+              {
+                "enum": [
+                  "udp",
+                  "doh"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "dns only: udp (the default) or doh, DNS over HTTPS (cloudflare and google; not the nodes' own resolvers, and not quad9, which answers only over HTTP/2)",
+            "title": "Transport"
           }
         },
         "required": [
@@ -850,6 +866,18 @@
             "maxLength": 45,
             "title": "Resolver",
             "type": "string"
+          },
+          "transport": {
+            "anyOf": [
+              {
+                "const": "doh",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Transport"
           },
           "truncated": {
             "default": false,
@@ -1744,6 +1772,21 @@
           "timeout_ms": {
             "title": "Timeout Ms",
             "type": "integer"
+          },
+          "transport": {
+            "anyOf": [
+              {
+                "enum": [
+                  "udp",
+                  "doh"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Transport"
           }
         },
         "required": [
@@ -3867,6 +3910,21 @@
             "minLength": 1,
             "title": "Target",
             "type": "string"
+          },
+          "transport": {
+            "anyOf": [
+              {
+                "enum": [
+                  "udp",
+                  "doh"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Transport"
           }
         },
         "required": [
@@ -4300,6 +4358,21 @@
               }
             ],
             "title": "Target"
+          },
+          "transport": {
+            "anyOf": [
+              {
+                "enum": [
+                  "udp",
+                  "doh"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Transport"
           }
         },
         "title": "WatchPatch",
@@ -6099,6 +6172,26 @@
                 }
               ],
               "title": "Resolver"
+            }
+          },
+          {
+            "in": "query",
+            "name": "transport",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "udp",
+                    "doh"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Transport"
             }
           },
           {

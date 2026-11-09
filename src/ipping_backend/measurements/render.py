@@ -103,7 +103,8 @@ def _line(kind: str, task: TaskOut, name: str) -> list[str]:
             "no such name" if dns.rcode == "NXDOMAIN" else dns.rcode.lower()
         )
         rtt = f"  {ms(first.rtt_ms)} ms" if first and first.rtt_ms is not None else ""
-        return [f"{name}  {what}{rtt}"]
+        via = "  (DoH)" if dns.transport == "doh" else ""
+        return [f"{name}  {what}{rtt}{via}"]
     if summary and summary.received > 0:
         return [
             f"{name}  {summary.received}/{summary.sent} received  "

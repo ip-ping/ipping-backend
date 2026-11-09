@@ -30,6 +30,14 @@ DNS_RESOLVERS: dict[str, str] = {
     "quad9": "9.9.9.9",
 }
 
+# The same resolvers over HTTPS (RFC 8484): the name their certificate is for, and the path of the endpoint.
+# The node asks the resolver's address on port 443 and checks the certificate for that name. Quad9 is not here
+# on purpose: it answers DNS over HTTPS only over HTTP/2 (HTTP 505 for HTTP/1.1), which the nodes do not speak.
+DOH_RESOLVERS: dict[str, tuple[str, str]] = {
+    "cloudflare": ("cloudflare-dns.com", "/dns-query"),
+    "google": ("dns.google", "/dns-query"),
+}
+
 # An HTTP check is a handful of packets and a TLS handshake: more than a ping, far less than a
 # traceroute. The unit is "one probe a node sends".
 HTTP_COST = 2
@@ -101,9 +109,14 @@ def plan_measurement(
         raise PlanError("invalid_option", "Only an http measurement can follow redirects.")
     if kind not in ("tcp", "http", "tls") and request.port is not None:
         raise PlanError("invalid_option", f"A {kind} measurement does not take a port.")
-    if kind != "dns" and (request.record_type is not None or request.resolver is not None):
+    if kind != "dns" and (
+        request.record_type is not None
+        or request.resolver is not None
+        or request.transport is not None
+    ):
         raise PlanError(
-            "invalid_option", "Only a dns measurement takes a record type or a resolver."
+            "invalid_option",
+            "Only a dns measurement takes a record type, a resolver or a transport.",
         )
 
     deadline = settings.measurement_deadline_s
@@ -176,6 +189,20 @@ def plan_measurement(
         }
         if resolver != "system":
             options["resolver_ip"] = DNS_RESOLVERS[resolver]
+        if request.transport == "doh":
+            if resolver == "system":
+                raise PlanError(
+                    "invalid_option",
+                    "DNS over HTTPS asks a public resolver (cloudflare or google), not each node's own.",
+                )
+            if resolver not in DOH_RESOLVERS:
+                raise PlanError(
+                    "invalid_option",
+                    f"{resolver} answers DNS over HTTPS only over HTTP/2, which the nodes do not speak. "
+                    "Use cloudflare or google, or ask it over plain DNS.",
+                )
+            host, path = DOH_RESOLVERS[resolver]
+            options.update(transport="doh", doh_host=host, doh_path=path)
         return Plan(options, None, max(deadline, DNS_TIMEOUT_MS // 1000 + 10))
 
     hops = settings.traceroute_max_hops
