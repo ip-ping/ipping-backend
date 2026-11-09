@@ -50,6 +50,9 @@ def _observations(tasks: list[MeasurementTask]) -> list[E.Observation]:
         lat, lon, rtt = info.get("latitude"), info.get("longitude"), summary.get("min_ms")
         if lat is None or lon is None or not summary.get("received") or rtt is None:
             continue
+        if info.get("tier") == "community" and not info.get("location_verified"):
+            # A volunteer's node says where it is and nobody has checked: it must not move an estimate.
+            continue
         result.append(
             E.Observation(
                 node_id=task.node_id,

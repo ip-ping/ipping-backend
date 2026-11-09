@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
+import ipaddress
 from datetime import datetime, timedelta
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, Field
@@ -12,7 +14,8 @@ from sqlalchemy import func, select
 from ..cluster import OnlineNode
 from ..deps import AdminUser, Db, Engine, client_ip, csrf_protect
 from ..errors import ApiError
-from ..measurements.schemas import TASK_ACTIVE
+from ..measurements.engine import MeasurementError, Owner
+from ..measurements.schemas import TASK_ACTIVE, CreateMeasurementRequest
 from ..models import (
     AuditEvent,
     EnrollmentToken,
@@ -22,12 +25,14 @@ from ..models import (
     new_id,
     utcnow,
 )
+from ..nodes.audit import Verifier, judge
 from ..runtime_settings import (
     RuntimeSettings,
     RuntimeSettingsUpdate,
     load_settings,
     save_settings,
 )
+from ..security.targets import address_is_public
 from ..security.tokens import hash_secret, new_secret
 
 router = APIRouter(
@@ -64,6 +69,10 @@ async def _audit(
 class CreateTokenRequest(BaseModel):
     label: str | None = Field(default=None, max_length=100)
     ttl_minutes: int = Field(default=60, ge=1, le=24 * 60)
+    tier: Literal["official", "community"] = Field(
+        default="official",
+        description="community: for a volunteer's node. It is left out of measurements unless asked for.",
+    )
 
 
 class TokenCreated(BaseModel):
@@ -80,6 +89,7 @@ class TokenOut(BaseModel):
     expires_at: datetime
     state: Literal["active", "used", "expired", "revoked"]
     node_id: str | None
+    tier: Literal["official", "community"] = "official"
 
 
 def _token_state(token: EnrollmentToken) -> str:
@@ -101,9 +111,12 @@ async def create_enrollment_token(
         label=body.label,
         created_by=admin.username,
         expires_at=utcnow() + timedelta(minutes=body.ttl_minutes),
+        tier=body.tier,
     )
     db.add(row)
-    await _audit(db, admin, request, "enrollment_token.created", row.id, label=body.label)
+    await _audit(
+        db, admin, request, "enrollment_token.created", row.id, label=body.label, tier=body.tier
+    )
     await db.commit()
     return TokenCreated(id=row.id, token=plaintext, expires_at=row.expires_at)
 
@@ -124,6 +137,7 @@ async def list_enrollment_tokens(admin: AdminUser, db: Db) -> list[TokenOut]:
             expires_at=r.expires_at,
             state=_token_state(r),
             node_id=r.node_id,
+            tier=r.tier,
         )
         for r in rows
     ]
@@ -160,6 +174,8 @@ class AdminNode(BaseModel):
     provider: str | None
     asn: int | None
     location_verified: bool
+    tier: Literal["official", "community"]
+    location_audit: dict[str, Any] | None
     version: str | None
     protocol_version: int | None
     remote_addr: str | None
@@ -180,6 +196,7 @@ class UpdateNodeRequest(BaseModel):
     provider: str | None = Field(default=None, max_length=100)
     asn: int | None = Field(default=None, ge=0, le=4_294_967_295)
     location_verified: bool | None = None
+    tier: Literal["official", "community"] | None = None
 
 
 class RotatedCredential(BaseModel):
@@ -207,6 +224,8 @@ def _admin_node(node: Node, online: dict[str, OnlineNode]) -> AdminNode:
         provider=node.provider,
         asn=node.asn,
         location_verified=node.location_verified,
+        tier=node.tier,
+        location_audit=node.location_audit,
         version=node.version,
         protocol_version=node.protocol_version,
         remote_addr=node.remote_addr,
@@ -243,6 +262,101 @@ async def update_node(
     for key, value in changes.items():
         setattr(node, key, value)
     await _audit(db, admin, request, "node.updated", node_id, fields=sorted(changes))
+    await db.commit()
+    return _admin_node(node, await _online(request, db))
+
+
+AUDIT_WAIT_S = 30.0
+
+
+@router.post("/nodes/{node_id}/audit-location", response_model=AdminNode)
+async def audit_node_location(
+    node_id: str, request: Request, admin: AdminUser, db: Db, engine: Engine
+) -> AdminNode:
+    """Ask verified official nodes to ping the node's address and check its declared place against the answers.
+
+    It stores what it found (`location_audit`) and changes nothing else: whether to mark the place verified
+    is the administrator's decision. It waits for the measurement (up to 30 s).
+    """
+    node = await _get_node(db, node_id)
+    if node.latitude is None or node.longitude is None:
+        raise ApiError(409, "no_location", "The node has not declared a location to check.")
+    when = utcnow()
+
+    def finish(result: dict[str, Any]) -> dict[str, Any]:
+        node.location_audit = result
+        return result
+
+    address = node.remote_addr
+    try:
+        public = address is not None and address_is_public(ipaddress.ip_address(address))
+    except ValueError:
+        public = False
+    if not public or address is None:
+        finish(
+            {
+                "status": "inconclusive",
+                "checked_at": when.isoformat(),
+                "address": str(address),
+                "evidence": [],
+                "summary": (
+                    "The node connects from an address that is not public (it is behind NAT, a VPN or a "
+                    "private network), so nothing can measure it. Verify its place some other way."
+                ),
+            }
+        )
+        await _audit(db, admin, request, "node.location_audited", node_id, status="inconclusive")
+        await db.commit()
+        return _admin_node(node, await _online(request, db))
+
+    online = await _online(request, db)
+    rows = (
+        await db.execute(
+            select(Node).where(
+                Node.status == "approved",
+                Node.tier == "official",
+                Node.location_verified.is_(True),
+                Node.id != node_id,
+            )
+        )
+    ).scalars()
+    # Plain values, copied now: the polling below must not touch ORM objects another session may change.
+    known = {
+        n.id: (n.name, n.latitude, n.longitude)
+        for n in rows
+        if n.id in online
+        and "ping" in online[n.id].capabilities.kinds
+        and n.latitude is not None
+        and n.longitude is not None
+    }
+    declared = (node.latitude, node.longitude)
+    heard: list[Verifier] = []
+    if known:
+        try:
+            measurement_id = await engine.create(
+                CreateMeasurementRequest(
+                    target=address, kind="ping", count=3, node_ids=list(known)
+                ),
+                Owner(None),
+                None,
+            )
+        except MeasurementError as exc:
+            raise ApiError(exc.status_code, exc.code, exc.message) from exc
+        current = None
+        for _ in range(int(AUDIT_WAIT_S * 2)):
+            async with request.app.state.sessionmaker() as poll:
+                current = await engine.load(poll, measurement_id)
+            if current is not None and current.status != "running":
+                break
+            await asyncio.sleep(0.5)
+        for task in current.tasks if current else []:
+            minimum = task.summary.min_ms if task.summary else None
+            info = known.get(task.node.id)
+            if info is not None and minimum is not None and task.summary and task.summary.received:
+                name, lat, lon = info
+                heard.append(Verifier(task.node.id, name, lat, lon, minimum))
+    result = finish(judge(declared[0], declared[1], address, heard, now=when))
+    await _audit(db, admin, request, "node.location_audited", node_id, status=result["status"])
     await db.commit()
     return _admin_node(node, await _online(request, db))
 

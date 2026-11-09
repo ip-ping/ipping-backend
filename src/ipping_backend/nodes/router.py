@@ -62,6 +62,7 @@ class PublicNode(BaseModel):
     ipv4: bool
     ipv6: bool
     kinds: list[str]
+    tier: Literal["official", "community"] = "official"
 
 
 @router.post("/enroll", response_model=EnrollResponse, status_code=201)
@@ -106,6 +107,7 @@ async def enroll(body: EnrollRequest, request: Request, db: Db) -> EnrollRespons
             asn=body.asn,
             version=body.version,
             remote_addr=ip,
+            tier=token.tier,
         )
     )
     db.add(
@@ -161,6 +163,7 @@ async def list_nodes(request: Request, db: Db) -> list[PublicNode]:
                 ipv4=caps.ipv4,
                 ipv6=caps.ipv6,
                 kinds=caps.kinds,
+                tier=node.tier,
             )
         )
     return result

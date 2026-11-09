@@ -64,6 +64,9 @@ class RuntimeSettings(BaseModel):
     # How many times a task whose backend instance died is sent again (only if the node had not
     # produced a result yet); 0 turns it off and such a task is reported as interrupted.
     task_retries: int = Field(default=1, ge=0, le=3)
+    # Community nodes (run by volunteers) are asked for at most this many tasks a minute each, so a
+    # measurement that includes them cannot hammer someone's home connection.
+    community_tasks_per_minute: int = Field(default=20, ge=1, le=600)
     # Scheduled checks (watches): how many, how often at most, how long their short history is kept.
     max_watches: int = Field(default=20, ge=0, le=500)
     min_watch_interval_s: int = Field(default=60, ge=30, le=3600)
@@ -95,6 +98,7 @@ class RuntimeSettingsUpdate(BaseModel):
     max_redirects: int | None = Field(default=None, ge=0, le=5)
     traceroute_max_hops: int | None = Field(default=None, ge=5, le=30)
     task_retries: int | None = Field(default=None, ge=0, le=3)
+    community_tasks_per_minute: int | None = Field(default=None, ge=1, le=600)
     max_watches: int | None = Field(default=None, ge=0, le=500)
     min_watch_interval_s: int | None = Field(default=None, ge=30, le=3600)
     watch_history_days: int | None = Field(default=None, ge=1, le=365)

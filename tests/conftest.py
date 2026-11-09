@@ -82,9 +82,10 @@ class Api:
         self.csrf = response.json()["csrf_token"]
 
     def enroll_node(
-        self, name: str = "Test node", approve: bool = True, **extra: Any
+        self, name: str = "Test node", approve: bool = True, tier: str | None = None, **extra: Any
     ) -> tuple[str, str]:
-        token = self.post("/api/v1/admin/enrollment-tokens", {"label": name}).json()["token"]
+        label: dict[str, Any] = {"label": name, **({"tier": tier} if tier else {})}
+        token = self.post("/api/v1/admin/enrollment-tokens", label).json()["token"]
         response = self.client.post(
             "/api/v1/nodes/enroll",
             json={

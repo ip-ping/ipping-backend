@@ -253,7 +253,9 @@ class MeasurementEngine:
             kind = request.kind
             each = probe_cost(kind, plan.options)
 
-            nodes = await self._select_nodes(session, request, resolved.chosen_ip, dns_mode)
+            nodes = await self._select_nodes(
+                session, request, resolved.chosen_ip, dns_mode, settings
+            )
             probes = len(nodes) * each
             if probes > settings.max_probes_per_measurement:
                 raise MeasurementError(
@@ -310,6 +312,7 @@ class MeasurementEngine:
                         latitude=node.latitude,
                         longitude=node.longitude,
                         location_verified=node.location_verified,
+                        tier=node.tier,
                     ).model_dump(),
                     tested_ip=measurement.target_ip,
                 )
@@ -449,6 +452,7 @@ class MeasurementEngine:
         request: schemas.CreateMeasurementRequest,
         chosen_ip: ipaddress.IPv4Address | ipaddress.IPv6Address | None,
         dns_mode: str,
+        settings: RuntimeSettings,
     ) -> list[Node]:
         """The nodes "all" means: approved, online, and able to run this probe, right now."""
         online = await self.cluster.online_nodes(session)
@@ -495,6 +499,12 @@ class MeasurementEngine:
                     409,
                 )
             eligible = [n for n in eligible if n.id in wanted]
+        elif not request.include_community:
+            # "All nodes" means the official ones: a volunteer's node is used when it is asked for.
+            eligible = [n for n in eligible if n.tier != "community"]
+        eligible = await self._without_busy_volunteers(
+            session, eligible, settings, explicit=request.node_ids is not None
+        )
         if request.countries is not None:
             eligible = [n for n in eligible if (n.country or "") in set(request.countries)]
         if not eligible:
@@ -502,6 +512,41 @@ class MeasurementEngine:
                 "no_eligible_nodes", "No online node can run this measurement right now.", 409
             )
         return eligible
+
+    async def _without_busy_volunteers(
+        self,
+        session: AsyncSession,
+        eligible: list[Node],
+        settings: RuntimeSettings,
+        *,
+        explicit: bool,
+    ) -> list[Node]:
+        """Community nodes already asked for `community_tasks_per_minute` tasks in the last minute are
+        left out ("all nodes"), or, when one was chosen by name, refused with a clear message."""
+        ids = [n.id for n in eligible if n.tier == "community"]
+        if not ids:
+            return eligible
+        recent = (
+            await session.execute(
+                select(MeasurementTask.node_id, func.count())
+                .join(Measurement, Measurement.id == MeasurementTask.measurement_id)
+                .where(
+                    MeasurementTask.node_id.in_(ids),
+                    Measurement.created_at > utcnow() - timedelta(minutes=1),
+                )
+                .group_by(MeasurementTask.node_id)
+            )
+        ).all()
+        busy = {
+            node_id for node_id, count in recent if count >= settings.community_tasks_per_minute
+        }
+        if busy and explicit:
+            raise MeasurementError(
+                "node_busy",
+                "A volunteer's node you chose is at its limit for the minute. Try again shortly.",
+                429,
+            )
+        return [n for n in eligible if n.id not in busy]
 
     # ----------------------------------------------------------------------------------------
     # Dispatch, deadline, cancellation

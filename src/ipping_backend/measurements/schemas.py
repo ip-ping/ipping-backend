@@ -81,6 +81,13 @@ class CreateMeasurementRequest(BaseModel):
     node_ids: list[str] | None = Field(
         default=None, max_length=1000, description="Limit to these nodes; omit for all eligible"
     )
+    include_community: bool = Field(
+        default=False,
+        description=(
+            "Also use community nodes (run by volunteers; their results are not verified). Without "
+            'this, "all nodes" means the official ones; choosing a node by id is a choice.'
+        ),
+    )
     countries: list[str] | None = Field(
         default=None, max_length=300, description="Limit to nodes in these ISO 3166 countries"
     )
@@ -109,6 +116,7 @@ class NodeInfo(BaseModel):
     latitude: float | None = None
     longitude: float | None = None
     location_verified: bool = False
+    tier: Literal["official", "community"] = "official"
 
 
 class Summary(BaseModel):

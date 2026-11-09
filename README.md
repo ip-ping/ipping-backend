@@ -381,6 +381,45 @@ Migrations run as an explicit step (`ipping-backend migrate`); the installer bac
 first. Upgrading from v0.2.0 was tested for real, including a v0.2.0 node connecting to the newer
 backend and running a ping.
 
+## Community nodes
+
+A node can be **official** (run by the people who run this service) or **community** (run by a volunteer). The point
+is to let volunteers add vantage points without letting a stranger's machine speak for the service. This is a first
+slice with clear limits, not a trust system. What it does:
+
+* **A volunteer needs a token of their own.** In Admin > Enrollment, create a token with tier *community*; it is single-use
+  and labelled with who it is for, so there is always a person behind a node. The node that enrolls with it is a
+  community node and still waits for an administrator to approve it. An administrator can change a node's tier.
+* **They are left out unless asked for.** "All nodes" means the official ones. A measurement that sets
+  `include_community` (the box on the measure form; `include_community=true` on `/api/v1/text`) also uses the online
+  community nodes, and choosing a node by name always works. Watches use official nodes only.
+* **Results say where they came from.** Every task carries its node's `tier`, shown as a badge in the interface.
+* **They cannot move a location estimate** until their place has been checked: a community node whose location is not
+  marked verified is not evidence for an estimate, whatever round trip it reports.
+* **They are rate limited.** Each community node is asked for at most `community_tasks_per_minute` tasks a minute
+  (default 20, an administrator setting): "all nodes" leaves a busy one out, and a request that names it is told so
+  (`node_busy`, 429).
+* **Their declared place can be audited.** `POST /api/v1/admin/nodes/{id}/audit-location` asks at least three online,
+  verified, official nodes to ping the address the node connects from, and applies the physics the location estimate
+  uses: no node can be further from an address than 150 km per millisecond of round trip. The result is
+  *inconsistent* (a verified node measured it too quickly for the declared place; it is named), *consistent* (not
+  contradicted, with a verified node close enough to mean something; this does not prove the place, a node in the next
+  city passes too) or *inconclusive* (too few verified nodes, none close enough, or the node connects from an address that
+  is not public, such as behind NAT or a VPN). It stores the answer and changes nothing: marking the place verified is the
+  administrator's decision.
+
+What it does **not** do, so nobody assumes it:
+
+* **It does not make a volunteer's results trustworthy.** A node can report any round trip, answer, status or
+  certificate. Keeping community results out by default, and labelling them when they are in, is the protection; nothing
+  checks them. Do not put a community node in a watch, and read its numbers as a volunteer's claim.
+* **It does not verify a place.** An audit can contradict a declared place; it cannot prove one.
+* **It does not stop a node from being used against its operator.** A node only runs the typed tasks the backend sends,
+  against public addresses and allowed ports (the node's own policy), and the operator can narrow that further; but the
+  backend, which the operator trusts, chooses the targets. Run a node only for a service you trust.
+* **Signed results and reputation are not built.** Signing would prove which node sent a result, not that it was true; a
+  reputation score needs history that does not exist yet.
+
 ## Roadmap
 
 Small steps, each one committed and logged in [CHANGELOG.md](CHANGELOG.md).
@@ -400,6 +439,7 @@ Small steps, each one committed and logged in [CHANGELOG.md](CHANGELOG.md).
 - [x] API keys with quotas of their own, and a plain-text endpoint for `curl` (the command-line client is in the ipping repository)
 - [x] Scheduled checks (watches) with quiet alerts to a webhook or ntfy, safe with several instances
 - [x] DNS checks (record types, public or per-node resolvers, privacy rules; the comparison view is in the web interface)
+- [x] Community nodes, first slice: a tier per node and token, left out unless asked for, rate limited, kept out of location estimates until verified, a location audit (no signed results or reputation)
 - [x] Traceroute in rounds like `mtr` (loss and spread per hop)
 - [x] DNS over HTTPS as a transport of the DNS check (cloudflare and google; quad9 needs HTTP/2)
 - [x] Certificate checks (`tls`: a handshake with no request; expiry, issuer, names, trust; a watch can alert before it expires)

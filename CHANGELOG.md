@@ -4,6 +4,28 @@ Progress log for `ipping-backend`, newest first. Each entry is one small, tested
 
 ## Unreleased
 
+### Community nodes (first slice)
+- Migration `0010`: `nodes.tier` and `enrollment_tokens.tier` (`official` by default, so everything existing is unchanged),
+  and `nodes.location_audit`. A token's tier becomes the tier of the node that enrolls with it; an administrator can
+  change a node's tier. Public nodes, admin nodes and every task's frozen node info carry `tier`.
+- "All nodes" means the official ones; `include_community` (a request field, `/api/v1/text` parameter and, in the
+  interface, a box) adds the online community nodes, and choosing a node by id always works. Watches use official nodes.
+- Each community node is asked for at most `community_tasks_per_minute` tasks a minute (a runtime setting, default 20):
+  "all nodes" quietly leaves out one that is at its limit, a request that names it gets `node_busy` (429).
+- A community node whose location is not verified is not evidence for a location estimate, so a volunteer cannot move one
+  by reporting a lie. (The estimate already refused to let an unverified node rule a place out.)
+- `POST /admin/nodes/{id}/audit-location`: asks at least three verified official nodes to ping the address the node
+  connects from and checks the declared place against their round trips with the physics the estimate uses; the result
+  is `consistent` (not contradicted, with a verified node near enough to matter), `inconsistent` (names the node that
+  ruled it out) or `inconclusive` (too few or too far, or an address that is not public), stored on the node. It verifies
+  nothing by itself.
+- What this is not (also in the README): it does not make a volunteer's results trustworthy, verify a place, protect
+  an operator from the service's own targets, or add signed results or reputation.
+- 11 tests: the judgement (consistent, inconsistent naming the witness, too few, too far), the token's tier and changing
+  it, default exclusion and opt-in and choosing by name, the rate limit (both behaviours and official nodes unlimited),
+  a lying volunteer not moving an estimate, and the audit through the API (consistent, inconsistent, a private address,
+  no declared place, administrators only). 340 on SQLite, 352 on PostgreSQL.
+
 ### DNS over HTTPS
 - A DNS check takes `transport` (`udp`, the default, or `doh`): the node asks the public resolver over HTTPS (RFC 8484,
   `GET /dns-query?dns=...` on port 443, the certificate checked for the resolver's name) instead of UDP port 53. It is

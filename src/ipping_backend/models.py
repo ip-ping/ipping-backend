@@ -109,6 +109,8 @@ class EnrollmentToken(Base):
     used_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     node_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+    # What a node that enrolls with this token becomes: official | community (run by a volunteer).
+    tier: Mapped[str] = mapped_column(String(16), default="official", server_default="official")
 
 
 class Node(Base):
@@ -128,6 +130,12 @@ class Node(Base):
     asn: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     # Set by an administrator after checking the node's declared location.
     location_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    # official | community. Community nodes are run by volunteers: they are left out of a measurement
+    # unless it asks for them, never feed a location estimate until their place is verified, and are
+    # rate limited (see `nodes/audit.py` and the README's "Community nodes").
+    tier: Mapped[str] = mapped_column(String(16), default="official", server_default="official")
+    # What the last location audit found: {status, summary, checked_at, address, evidence: [...]}.
+    location_audit: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     capabilities: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)
     version: Mapped[str | None] = mapped_column(String(32), nullable=True)
     protocol_version: Mapped[int | None] = mapped_column(Integer, nullable=True)
