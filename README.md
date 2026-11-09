@@ -8,8 +8,8 @@ This repository is the coordinator. It validates targets, schedules work onto no
 aggregates results, estimates where an address appears to be, and owns the contracts the other two
 repositories build against.
 
-Current release: **v0.6.0** (database migration head `0010`). Nodes of any earlier version keep
-working for ping; TCP, HTTP and traceroute need node v0.3.0 or newer, DNS checks need node v0.4.0, traceroute rounds and certificate checks need node v0.5.0, and DNS over HTTPS and QUIC need node v0.6.0.
+Current release: **v0.6.1** (database migration head `0010`). Nodes of any earlier version keep
+working for ping; TCP, HTTP and traceroute need node v0.3.0 or newer, DNS checks need node v0.4.0, traceroute rounds and certificate checks need node v0.5.0, and DNS over HTTPS and QUIC need node v0.6.0 (a measurement that asks for either goes only to nodes that have it).
 
 | Repository | Role |
 |---|---|
@@ -370,6 +370,7 @@ first because the application release pins it.
 
 | Release | Database head | Notes |
 |---|---|---|
+| v0.6.1 | `0010` | fix: a node older than v0.6.0 is no longer asked for DNS over HTTPS or QUIC, which it answered the plain way without saying so |
 | v0.6.0 | `0010` | community nodes (a tier per node and token, left out unless asked for, rate limited, kept out of location estimates until verified, a location audit); DNS over HTTPS and QUIC as transports of the DNS and certificate checks |
 | v0.5.1 | `0009` | fix: a backend that was paused (a suspended machine or VM, a long stall, PostgreSQL being away) no longer drops its nodes' connections and leaves them offline |
 | v0.5.0 | `0009` | traceroute in rounds like `mtr`; the path endpoint (networks and places of a route's routers); certificate checks (`tls` is enabled for deployments that had every kind on); a fix to the text cleaner |
@@ -432,7 +433,7 @@ Small steps, each one committed and logged in [CHANGELOG.md](CHANGELOG.md).
 - [x] Dockerfile, CI (lint, types, tests, contract-drift check) and Docker Hub publishing
 - [x] API tests also run on PostgreSQL
 - [x] Release workflow: tag or manual run, dry run, version check, image + wheel + lock + contracts
-- [x] Tagged releases: v0.1.0, v0.2.0, v0.3.0, v0.4.0, v0.4.1, v0.5.0, v0.5.1, v0.6.0
+- [x] Tagged releases: v0.1.0, v0.2.0, v0.3.0, v0.4.0, v0.4.1, v0.5.0, v0.5.1, v0.6.0, v0.6.1
 - [x] More than one backend process or host (shared presence, owner-sends dispatch, reaper)
 - [ ] Per-session / per-IP quota tuning from real traffic
 - [x] TCP, HTTP and traceroute (protocol, planning, validation, tests; node and frontend shipped in v0.3.0)

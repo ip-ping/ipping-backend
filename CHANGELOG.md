@@ -2,6 +2,23 @@
 
 Progress log for `ipping-backend`, newest first. Each entry is one small, tested step.
 
+## v0.6.1 (2026-11-09)
+
+A fix found by installing the released v0.6.0 over a real v0.5.1 stack. No database change (head `0010`).
+
+### fix: a node that cannot do DNS over HTTPS or QUIC is not asked for it
+- A node older than v0.6.0 does not know the `transport` option, ignores it, and does the plain thing: a DNS question
+  over UDP for `doh`, a TCP handshake for `quic`. Both came back `ok`, with nothing to say they were not what was asked
+  for (the cards show the transport the node reports, so they looked like an ordinary check). During a rolling update that
+  is every node not yet updated.
+- A measurement with `transport` `doh` or `quic` now goes only to nodes of v0.6.0 or newer (the version the node
+  announces; one that cannot be read counts as too old, since a wrong "no" leaves a node out and a wrong "yes" gives the
+  wrong answer). When no online node qualifies, the error says what is missing ("None of the 2 online nodes can run a dns
+  measurement over DoH yet. Nodes need to be updated to a newer version."); a request that names such a node by id gets
+  `node_unavailable`. Plain DNS and TCP certificate checks still go to every node.
+- 4 tests (which versions count, a mixed fleet, every node too old for DoH, a node without QUIC) and the test node
+  announces v0.6.0 unless told otherwise. 372 on PostgreSQL, 360 on SQLite.
+
 ## v0.6.0 (2026-11-09)
 
 Community nodes (a first slice), DNS over HTTPS, and QUIC for the certificate check. The database migrates to `0010` (a tier on

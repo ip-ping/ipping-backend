@@ -49,6 +49,26 @@ class Capabilities(_Frame):
     ipv6: bool = False
 
 
+# The first node release that speaks each transport. A node older than that ignores the option and
+# answers the plain way (a TCP handshake for "quic", an ordinary DNS question for "doh"), which is
+# not what was asked for, so it is not asked at all.
+TRANSPORT_SINCE: dict[str, tuple[int, int, int]] = {"doh": (0, 6, 0), "quic": (0, 6, 0)}
+_RELEASE = re.compile(r"(\d+)\.(\d+)\.(\d+)")
+
+
+def node_speaks(node_version: str | None, transport: str | None) -> bool:
+    """Whether a node of this version can really use `transport` (any other transport: yes).
+
+    A version that cannot be read is taken as too old: a wrong "no" leaves a node out of a
+    measurement, a wrong "yes" gives a result that is not the one asked for.
+    """
+    since = TRANSPORT_SINCE.get(transport or "")
+    if since is None:
+        return True
+    found = _RELEASE.match(node_version or "")
+    return found is not None and tuple(int(part) for part in found.groups()) >= since
+
+
 class Hello(_Frame):
     type: Literal["hello"] = "hello"
     protocol_versions: list[int] = Field(min_length=1, max_length=16)

@@ -336,3 +336,24 @@ def test_a_quic_check_reaches_the_node_and_its_result_says_it_was_quic(api: Api)
         assert "(QUIC, h3)" in text, text
     finally:
         ws.__exit__(None, None, None)
+
+
+def test_a_node_without_quic_is_not_asked_for_a_quic_check(api: Api) -> None:
+    """A 0.5.1 node would do the handshake over TCP and report it as an ordinary certificate
+    check: right certificate, wrong question."""
+    api.become_admin()
+    _, credential = api.enroll_node()
+    ws, session = connect(api, credential, kinds=ALL_KINDS + ("tls",), version="0.5.1")
+    try:
+        refused = api.post(
+            "/api/v1/measurements", {"target": "example.com", "kind": "tls", "transport": "quic"}
+        )
+        assert refused.status_code == 409, refused.text
+        error = refused.json()["error"]
+        assert error["code"] == "kind_not_supported"
+        assert "tls measurement over QUIC" in error["message"]
+        # The ordinary check still goes to it.
+        _start(api, target="example.com", kind="tls")
+        assert _task(session)["kind"] == "tls"
+    finally:
+        ws.__exit__(None, None, None)

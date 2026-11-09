@@ -57,11 +57,15 @@ def read_sse(response: Any) -> list[dict[str, Any]]:
 
 
 def connect(
-    api: Api, credential: str, ipv6: bool = True, kinds: tuple[str, ...] = ("ping",)
+    api: Api,
+    credential: str,
+    ipv6: bool = True,
+    kinds: tuple[str, ...] = ("ping",),
+    version: str = "0.6.0",
 ) -> Any:
     ws = api.client.websocket_connect("/api/v1/nodes/connect", headers=node_headers(credential))
     session = ws.__enter__()
-    session.send_text(hello(ipv6=ipv6, kinds=kinds))
+    session.send_text(hello(ipv6=ipv6, kinds=kinds, version=version))
     welcome = json.loads(session.receive_text())
     assert welcome["type"] == "welcome"
     return ws, session

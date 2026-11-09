@@ -477,14 +477,19 @@ class MeasurementEngine:
             present = online.get(node.id)
             if present is not None:
                 online_approved += 1
-                if capable(present.capabilities):
+                if capable(present.capabilities) and proto.node_speaks(
+                    node.version, request.transport
+                ):
                     eligible.append(node)
         eligible.sort(key=lambda n: (n.country or "~", n.city or "~", n.name))
         if not eligible and online_approved and request.kind != "ping":
+            what = f"{request.kind} measurement"
+            if request.transport is not None and request.transport in proto.TRANSPORT_SINCE:
+                what += f" over {'DoH' if request.transport == 'doh' else 'QUIC'}"
             raise MeasurementError(
                 "kind_not_supported",
-                f"None of the {online_approved} online nodes can run a {request.kind} "
-                "measurement yet. Nodes need to be updated to a newer version.",
+                f"None of the {online_approved} online nodes can run a {what} yet. "
+                "Nodes need to be updated to a newer version.",
                 409,
             )
 

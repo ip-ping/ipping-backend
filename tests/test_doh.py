@@ -154,3 +154,70 @@ def test_the_text_endpoint_passes_the_transport_on(api: Api) -> None:
         assert "(DoH)" in result["response"].text
     finally:
         ws.__exit__(None, None, None)
+
+
+@pytest.mark.parametrize(
+    ("version", "speaks"),
+    [
+        ("0.5.1", False), ("0.6.0", True), ("0.6.1", True), ("0.10.0", True), ("1.0.0", True),
+        ("0.6.0-rc1", True), ("0.6", False), ("", False), (None, False), ("garbage", False),
+    ],
+)  # fmt: skip
+def test_which_node_versions_speak_which_transport(version: str | None, speaks: bool) -> None:
+    assert protocol.node_speaks(version, "doh") is speaks
+    assert protocol.node_speaks(version, "quic") is speaks
+    for plain in (None, "udp", "tcp"):  # the default transports are every node's
+        assert protocol.node_speaks(version, plain) is True
+
+
+def test_a_node_that_ignores_the_transport_is_not_asked_for_it(api: Api) -> None:
+    """A 0.5.1 node would answer a DoH question with plain DNS and a QUIC one over TCP: found when
+    upgrading a real v0.5.1 stack, where both came back "ok" and nothing said they were not
+    what was asked."""
+    api.become_admin()
+    api.patch("/api/v1/admin/settings", {"max_concurrent_per_session": 50})
+    _, old = api.enroll_node("Old")
+    _, current = api.enroll_node("Current")
+    old_ws, old_session = connect(api, old, kinds=KINDS_WITH_DNS, version="0.5.1")
+    ws, session = connect(api, current, kinds=KINDS_WITH_DNS)
+    try:
+        measurement = _start(
+            api, target="example.com", kind="dns", resolver="google", transport="doh"
+        )
+        assert [t["node"]["name"] for t in measurement["tasks"]] == ["Current"]
+        assert _task(session)["options"]["transport"] == "doh"
+        # Plain DNS is asked of both.
+        plain = _start(api, target="example.com", kind="dns", resolver="google")
+        assert sorted(t["node"]["name"] for t in plain["tasks"]) == ["Current", "Old"]
+        # Asking the old node for it by name says it cannot.
+        named = api.post(
+            "/api/v1/measurements",
+            {"target": "example.com", "kind": "dns", "resolver": "google", "transport": "doh",
+             "node_ids": [measurement["tasks"][0]["node"]["id"], _node_id(api, "Old")]},
+        )  # fmt: skip
+        assert named.status_code == 409 and named.json()["error"]["code"] == "node_unavailable"
+    finally:
+        ws.__exit__(None, None, None)
+        old_ws.__exit__(None, None, None)
+
+
+def test_when_every_node_is_too_old_the_error_says_what_to_update_for(api: Api) -> None:
+    api.become_admin()
+    _, credential = api.enroll_node()
+    ws, _ = connect(api, credential, kinds=KINDS_WITH_DNS, version="0.5.1")
+    try:
+        refused = api.post(
+            "/api/v1/measurements",
+            {"target": "example.com", "kind": "dns", "resolver": "cloudflare", "transport": "doh"},
+        )
+        assert refused.status_code == 409
+        error = refused.json()["error"]
+        assert error["code"] == "kind_not_supported"
+        assert "dns measurement over DoH" in error["message"] and "updated" in error["message"]
+    finally:
+        ws.__exit__(None, None, None)
+
+
+def _node_id(api: Api, name: str) -> str:
+    nodes = api.get("/api/v1/admin/nodes").json()
+    return next(n["id"] for n in nodes if n["name"] == name)
