@@ -2,6 +2,24 @@
 
 Progress log for `ipping-backend`, newest first. Each entry is one small, tested step.
 
+## Unreleased
+
+### DNS over HTTPS
+- A DNS check takes `transport` (`udp`, the default, or `doh`): the node asks the public resolver over HTTPS (RFC 8484,
+  `GET /dns-query?dns=...` on port 443, the certificate checked for the resolver's name) instead of UDP port 53. It is
+  asked of **cloudflare** (`cloudflare-dns.com`) and **google** (`dns.google`); the plan gives the node the address, the
+  name and the path (`resolver_ip`, `doh_host`, `doh_path`), so a node never asks a server the backend did not name.
+- **quad9 is refused, with the reason**, because testing against the real resolvers showed that Quad9 answers DNS over
+  HTTPS only over HTTP/2 ("505 HTTP Version Not Supported ... requires HTTP/2", which RFC 8484 allows) and the nodes
+  speak HTTP/1.1. The nodes' own resolvers (`system`) cannot be asked over HTTPS either. Both say so in the error.
+- The sample's detail gains `transport: "doh"` (absent for plain DNS); the plain-text report marks it `(DoH)`;
+  `MeasurementOptions.transport`; the text endpoint and watches take `transport` too. Contracts regenerated; example frames
+  `task_dns_doh` and `sample_dns_doh` (also in the node repository).
+- 12 tests: the plan for each resolver, plain DNS unchanged, the refusals and their reasons, the detail and option limits,
+  a measurement through a node, the text endpoint. 329 on SQLite and 341 on PostgreSQL.
+- Needs a node newer than v0.5.1 to ask over HTTPS; an older node would ignore `transport` and ask over UDP, so the
+  result would not say `doh` (it is shown by what the node reports, not by what was asked).
+
 ## v0.5.1 (2026-11-09)
 
 One fix, found by installing the released v0.5.0 on a fresh Debian 13 and reproduced on the released image by freezing
