@@ -2,6 +2,24 @@
 
 Progress log for `ipping-backend`, newest first. Each entry is one small, tested step.
 
+## Unreleased
+
+### fix: a backend that was paused took itself for dead and dropped its nodes
+Found by installing the released v0.5.0 on a fresh Debian 13 in a container whose machine kept going to sleep: the
+node was approved and connected, and the site listed it as offline for over an hour.
+- The reaper deletes the connection rows of every instance whose last heartbeat is older than 10 seconds, and
+  that included the instance it was running in. After any stall longer than that (a suspended machine or VM, a long
+  pause, or PostgreSQL being away for a while: nothing could be heartbeated meanwhile) the reaper woke up, found its
+  own heartbeat stale and deleted the rows of every node it was holding, and interrupted the measurements it owned.
+  The sockets stayed open, so the nodes had no reason to reconnect and stayed "offline" and unused until the service
+  or the node was restarted. It happened on any single instance and on every release since the cluster work.
+- The reaper now always counts its own process as alive. And every heartbeat (3 seconds) puts back the rows of
+  connections the process really holds if they are gone, but only where no row exists for the node, so a node that
+  reconnected to another instance is never taken back. A restore is logged as a warning.
+- 4 tests (the stalled process keeps its connection; lost rows come back while the socket is open; a node that
+  moved to another instance is left alone; a node that disconnected is not put back). The first fails on the old
+  code with the symptom seen on Debian. Suites: 313 on SQLite, 325 on PostgreSQL (the two-instance tests included).
+
 ## v0.5.0 (2026-11-09)
 
 Traceroute in rounds like `mtr`, the networks and places of a route's routers, and certificate checks. The database

@@ -99,6 +99,11 @@ def create_app(
             pending_grace_s=settings.pending_grace_s,
         )
         cluster.on_command(engine.handle_command)
+        cluster.on_live_connections(
+            lambda: [
+                (c.node_id, c.capabilities, c.protocol_version) for c in registry.connections()
+            ]
+        )
         app.state.settings = settings
         app.state.db_engine = db_engine
         app.state.sessionmaker = sessionmaker

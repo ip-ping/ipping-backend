@@ -712,7 +712,9 @@ class MeasurementEngine:
     async def reap(self) -> None:
         now = utcnow()
         async with self._sessionmaker() as session:
-            alive = await self.cluster.alive_instance_ids(session)
+            # This process is running, whatever its last heartbeat says: after a pause it must not take
+            # itself for dead and throw away the connections it holds.
+            alive = (await self.cluster.alive_instance_ids(session)) | {self.cluster.instance_id}
             online = set((await self.cluster.online_nodes(session)).keys())
             expired = list(
                 (

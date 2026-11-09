@@ -56,6 +56,9 @@ class NodeRegistry:
     def get(self, node_id: str) -> NodeConnection | None:
         return self._connections.get(node_id)
 
+    def connections(self) -> list[NodeConnection]:
+        return list(self._connections.values())
+
     def online_ids(self) -> set[str]:
         return set(self._connections)
 

@@ -7,6 +7,10 @@ Everything that must be shared lives in the database; everything else is a hint.
   A node is online when its row exists *and* its process is alive. A process that stops
   heartbeating is dead to everyone else after `instance_dead_after_s`, which is how a crash is
   noticed (a clean shutdown removes the row at once).
+  A process that was paused (a suspended machine, a long stall, a database that was away for a
+  while) is not dead, and must never decide that it is: the reaper always counts its own process as
+  alive, and every heartbeat puts back the rows of connections the process really holds if someone
+  removed them meanwhile, so a node never stays "offline" while its socket is open.
 * **Wake-ups, not messages.** PostgreSQL `LISTEN/NOTIFY` tells other processes that "something
   changed, go look" (new tasks, new events, a command). Nothing depends on a notification arriving:
   every consumer also polls on a timer, and the work itself (tasks, events) is read from tables. A
@@ -124,6 +128,7 @@ class Cluster:
         self._database_url = database_url
         self.is_postgres = engine.dialect.name == "postgresql"
         self._command_handler: CommandHandler | None = None
+        self._live_connections: Callable[[], list[tuple[str, Capabilities, int]]] | None = None
         self._tasks: list[asyncio.Task[None]] = []
         self._background: set[asyncio.Task[None]] = set()
 
@@ -133,6 +138,12 @@ class Cluster:
 
     def on_command(self, handler: CommandHandler) -> None:
         self._command_handler = handler
+
+    def on_live_connections(
+        self, provider: Callable[[], list[tuple[str, Capabilities, int]]]
+    ) -> None:
+        """Where to ask which node sockets this process really holds: (node id, capabilities, protocol)."""
+        self._live_connections = provider
 
     async def start(self) -> None:
         await self._heartbeat_once()
@@ -173,8 +184,58 @@ class Cluster:
             await asyncio.sleep(self.heartbeat_s)
             try:
                 await self._heartbeat_once()
+                await self.restore_connections()
             except Exception:
                 log.exception("heartbeat failed")
+
+    async def restore_connections(self) -> int:
+        """Put back the rows of connections this process holds but the database has lost.
+
+        Another process (or this one, after a stall) may have taken this instance for dead and removed
+        its rows while the sockets stayed open. A row is only added where there is none for the node:
+        a node that has since reconnected to another instance is that instance's, not ours.
+        """
+        if self._live_connections is None:
+            return 0
+        live = self._live_connections()
+        if not live:
+            return 0
+        restored = 0
+        async with self._sessionmaker() as db:
+            have = set(
+                (
+                    await db.execute(
+                        select(NodeConnection.node_id).where(
+                            NodeConnection.node_id.in_([node_id for node_id, _, _ in live])
+                        )
+                    )
+                ).scalars()
+            )
+            for node_id, capabilities, protocol_version in live:
+                if node_id in have:
+                    continue
+                db.add(
+                    NodeConnection(
+                        node_id=node_id,
+                        instance_id=self.instance_id,
+                        connected_at=utcnow(),
+                        protocol_version=protocol_version,
+                        capabilities=capabilities.model_dump(),
+                    )
+                )
+                restored += 1
+            try:
+                await db.commit()
+            except IntegrityError:  # another instance claimed one of them first: theirs wins
+                await db.rollback()
+                return 0
+        if restored:
+            log.warning(
+                "restored %d node connection(s) that had been removed from the database",
+                restored,
+            )
+            self.signal_tasks()
+        return restored
 
     # ----------------------------------------------------------------------------------------
     # Who is alive, who is online
