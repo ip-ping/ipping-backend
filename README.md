@@ -403,7 +403,8 @@ Small steps, each one committed and logged in [CHANGELOG.md](CHANGELOG.md).
 - [x] Traceroute in rounds like `mtr` (loss and spread per hop)
 - [x] Certificate checks (`tls`: a handshake with no request; expiry, issuer, names, trust; a watch can alert before it expires)
 - [x] The network and place of each router on a traced path (from the GeoIP databases; the route map is in the web interface)
-- [ ] Public IPv6 verified end to end (needs a test host with IPv6 internet)
+- [x] Every kind over IPv6 with global addresses and the real policy, in a network-namespace lab (node CI); see the node README for what that does and does not prove
+- [ ] Over the real public IPv6 internet (needs a host with IPv6 connectivity; neither the development machine nor CI runners have it)
 - [x] Estimated network location: constraint-based, evidence listed, explicit "insufficient evidence"
 - [x] Calibrate the location model against real targets of known location (RIPE Atlas anchors; held-out half reported)
 - [x] A GeoIP / ASN database as a checked second opinion (ruled out by the measurements, or consistent); geofeeds (RFC 8805) not done
