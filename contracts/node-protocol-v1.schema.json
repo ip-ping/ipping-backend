@@ -389,7 +389,7 @@
       }
     ]
   },
-  "backend_version": "0.5.0",
+  "backend_version": "0.5.1",
   "description": "JSON text frames exchanged over the node WebSocket.",
   "node_to_backend": {
     "$defs": {

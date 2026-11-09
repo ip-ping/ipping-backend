@@ -2,7 +2,11 @@
 
 Progress log for `ipping-backend`, newest first. Each entry is one small, tested step.
 
-## Unreleased
+## v0.5.1 (2026-11-09)
+
+One fix, found by installing the released v0.5.0 on a fresh Debian 13 and reproduced on the released image by freezing
+the container for 25 seconds (the node went from online to offline and its row vanished); the fix is below. Nothing else
+changed, and no migration.
 
 ### fix: a backend that was paused took itself for dead and dropped its nodes
 Found by installing the released v0.5.0 on a fresh Debian 13 in a container whose machine kept going to sleep: the
