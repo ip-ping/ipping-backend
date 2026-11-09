@@ -62,11 +62,12 @@ class CreateMeasurementRequest(BaseModel):
             "the others ask that public resolver from every node (default system)"
         ),
     )
-    transport: Literal["udp", "doh"] | None = Field(
+    transport: Literal["udp", "doh", "tcp", "quic"] | None = Field(
         default=None,
         description=(
-            "dns only: udp (the default) or doh, DNS over HTTPS (cloudflare and google; not the nodes' "
-            "own resolvers, and not quad9, which answers only over HTTP/2)"
+            "dns: udp (the default) or doh, DNS over HTTPS (cloudflare and google; not the nodes' "
+            "own resolvers, and not quad9, which answers only over HTTP/2). tls: tcp (the default) "
+            "or quic, a QUIC handshake offering h3 over UDP"
         ),
     )
     count: int | None = Field(
@@ -180,7 +181,7 @@ class MeasurementOptions(BaseModel):
     max_hops: int | None = None
     record_type: DnsRecordType | None = None
     resolver: Literal["system", "cloudflare", "google", "quad9"] | None = None
-    transport: Literal["udp", "doh"] | None = None
+    transport: Literal["udp", "doh", "tcp", "quic"] | None = None
 
 
 class TargetOut(BaseModel):

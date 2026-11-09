@@ -160,7 +160,8 @@ class TaskOptions(_Frame):
     * http: scheme, path, timeout_ms, max_redirects (one request, so no count)
     * traceroute: max_hops, timeout_ms (per hop; three probes are sent to each hop), and, to repeat
       the trace like mtr, count (rounds, default 1) and interval_ms (between rounds)
-    * tls: timeout_ms (one handshake, so no count; a port and a server name are in the target)
+    * tls: timeout_ms (one handshake, so no count; a port and a server name are in the target);
+      transport quic is a QUIC handshake over UDP offering h3
     * dns: record_type, resolver_ip (absent: the node's own resolvers), transport (doh: DNS over
       HTTPS to resolver_ip, with doh_host and doh_path), timeout_ms (one question,
       so no count; the name is the target's `hostname`, and the node never resolves it itself)
@@ -177,7 +178,8 @@ class TaskOptions(_Frame):
     resolver_ip: str | None = Field(default=None, max_length=45)
     # dns over HTTPS: `transport` is "doh", the resolver is asked at `resolver_ip` on port 443, and the
     # node checks its certificate for `doh_host` and asks `doh_path`.
-    transport: Literal["udp", "doh"] | None = None
+    # tls: `quic` is a QUIC handshake offering h3 (UDP) instead of TLS over TCP.
+    transport: Literal["udp", "doh", "tcp", "quic"] | None = None
     doh_host: str | None = Field(default=None, max_length=253)
     doh_path: str | None = Field(default=None, max_length=64)
 
@@ -316,8 +318,11 @@ class TlsDetail(_Frame):
     tls: TlsInfo | None = None
     names: list[str] = Field(default_factory=list, max_length=24)
     chain: int | None = Field(default=None, ge=0, le=32)
+    # "quic" when the handshake was QUIC; absent for TLS over TCP. `alpn` is the protocol agreed (h3).
+    transport: Literal["quic"] | None = None
+    alpn: str | None = Field(default=None, max_length=16)
 
-    @field_validator("server_name")
+    @field_validator("server_name", "alpn")
     @classmethod
     def _clean_name(cls, value: str | None) -> str | None:
         return _printable(value)

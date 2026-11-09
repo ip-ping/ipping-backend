@@ -39,7 +39,7 @@ async def text_measurement(
     count: Annotated[int | None, Query(ge=1, le=10)] = None,
     record_type: DnsRecordType | None = None,
     resolver: Literal["system", "cloudflare", "google", "quad9"] | None = None,
-    transport: Literal["udp", "doh"] | None = None,
+    transport: Literal["udp", "doh", "tcp", "quic"] | None = None,
     follow_redirects: bool = False,
     include_community: bool = False,
     family: Literal["auto", "4", "6"] = "auto",

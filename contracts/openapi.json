@@ -764,7 +764,9 @@
               {
                 "enum": [
                   "udp",
-                  "doh"
+                  "doh",
+                  "tcp",
+                  "quic"
                 ],
                 "type": "string"
               },
@@ -772,7 +774,7 @@
                 "type": "null"
               }
             ],
-            "description": "dns only: udp (the default) or doh, DNS over HTTPS (cloudflare and google; not the nodes' own resolvers, and not quad9, which answers only over HTTP/2)",
+            "description": "dns: udp (the default) or doh, DNS over HTTPS (cloudflare and google; not the nodes' own resolvers, and not quad9, which answers only over HTTP/2). tls: tcp (the default) or quic, a QUIC handshake offering h3 over UDP",
             "title": "Transport"
           }
         },
@@ -1816,7 +1818,9 @@
               {
                 "enum": [
                   "udp",
-                  "doh"
+                  "doh",
+                  "tcp",
+                  "quic"
                 ],
                 "type": "string"
               },
@@ -3378,6 +3382,18 @@
       "TlsDetail": {
         "description": "What one certificate check found: a TLS handshake with no request after it. Times are\nmicroseconds, measured on the node.\n\n`tls` is the same record an HTTP check carries (version, cipher, subject, issuer, validity, whether\nthis node trusts the certificate and why not). `names` are the names the certificate is valid for\nand `chain` is how many certificates the server sent. A certificate that is not trusted still\ncomes with all of it: the point of the check is to see what is wrong.",
         "properties": {
+          "alpn": {
+            "anyOf": [
+              {
+                "maxLength": 16,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alpn"
+          },
           "chain": {
             "anyOf": [
               {
@@ -3459,6 +3475,18 @@
               }
             ],
             "title": "Total Us"
+          },
+          "transport": {
+            "anyOf": [
+              {
+                "const": "quic",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Transport"
           }
         },
         "title": "TlsDetail",
@@ -4016,7 +4044,9 @@
               {
                 "enum": [
                   "udp",
-                  "doh"
+                  "doh",
+                  "tcp",
+                  "quic"
                 ],
                 "type": "string"
               },
@@ -4464,7 +4494,9 @@
               {
                 "enum": [
                   "udp",
-                  "doh"
+                  "doh",
+                  "tcp",
+                  "quic"
                 ],
                 "type": "string"
               },
@@ -6326,7 +6358,9 @@
                 {
                   "enum": [
                     "udp",
-                    "doh"
+                    "doh",
+                    "tcp",
+                    "quic"
                   ],
                   "type": "string"
                 },

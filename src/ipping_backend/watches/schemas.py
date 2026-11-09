@@ -23,7 +23,7 @@ class WatchIn(BaseModel):
     family: Literal["auto", "4", "6"] = "auto"
     record_type: DnsRecordType | None = None
     resolver: Literal["system", "cloudflare", "google", "quad9"] | None = None
-    transport: Literal["udp", "doh"] | None = None
+    transport: Literal["udp", "doh", "tcp", "quic"] | None = None
     node_ids: list[str] | None = Field(
         default=None, max_length=1000, description="Omit for all nodes"
     )
@@ -54,7 +54,7 @@ class WatchPatch(BaseModel):
     family: Literal["auto", "4", "6"] | None = None
     record_type: DnsRecordType | None = None
     resolver: Literal["system", "cloudflare", "google", "quad9"] | None = None
-    transport: Literal["udp", "doh"] | None = None
+    transport: Literal["udp", "doh", "tcp", "quic"] | None = None
     node_ids: list[str] | None = Field(default=None, max_length=1000)
     all_nodes: bool | None = Field(default=None, description="true clears node_ids")
     interval_s: int | None = Field(default=None, ge=30, le=86_400)

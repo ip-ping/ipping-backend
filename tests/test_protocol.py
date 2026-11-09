@@ -68,6 +68,7 @@ def test_task_needs_exactly_one_destination() -> None:
         ("sample_hop_rounds", "traceroute"),
         ("sample_tls", "tls"),
         ("sample_dns_doh", "dns"),
+        ("sample_tls_quic", "tls"),
     ],
 )
 def test_detail_fixtures_fit_their_models(name: str, kind: str) -> None:
@@ -84,10 +85,16 @@ def test_detail_fixtures_fit_their_models(name: str, kind: str) -> None:
         "task_traceroute_rounds",
         "task_tls",
         "task_dns_doh",
+        "task_tls_quic",
     ],
 )
 def test_task_fixtures_name_their_kind(name: str) -> None:
     frame = json.loads((CONTRACTS / "fixtures" / "backend-to-node" / f"{name}.json").read_text())
     parsed = protocol.backend_to_node.validate_python(frame)
-    kind = name.removeprefix("task_").removesuffix("_rounds").removesuffix("_doh")
+    kind = (
+        name.removeprefix("task_")
+        .removesuffix("_rounds")
+        .removesuffix("_doh")
+        .removesuffix("_quic")
+    )
     assert isinstance(parsed, protocol.TaskFrame) and parsed.kind == kind

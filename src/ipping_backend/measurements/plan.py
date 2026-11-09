@@ -109,15 +109,21 @@ def plan_measurement(
         raise PlanError("invalid_option", "Only an http measurement can follow redirects.")
     if kind not in ("tcp", "http", "tls") and request.port is not None:
         raise PlanError("invalid_option", f"A {kind} measurement does not take a port.")
-    if kind != "dns" and (
-        request.record_type is not None
-        or request.resolver is not None
-        or request.transport is not None
-    ):
+    if kind != "dns" and (request.record_type is not None or request.resolver is not None):
         raise PlanError(
-            "invalid_option",
-            "Only a dns measurement takes a record type, a resolver or a transport.",
+            "invalid_option", "Only a dns measurement takes a record type or a resolver."
         )
+    if request.transport is not None:
+        # udp and doh are the ways to ask DNS; tcp and quic are the ways to reach a TLS server.
+        transports = {"dns": ("udp", "doh"), "tls": ("tcp", "quic")}.get(kind)
+        if transports is None:
+            raise PlanError("invalid_option", "Only a dns or tls measurement takes a transport.")
+        if request.transport not in transports:
+            raise PlanError(
+                "invalid_option",
+                f"A {kind} measurement's transport is {' or '.join(transports)}, "
+                f"not {request.transport}.",
+            )
 
     deadline = settings.measurement_deadline_s
     if kind in ("ping", "tcp"):
@@ -174,6 +180,8 @@ def plan_measurement(
             "timeout_ms": TLS_TIMEOUT_MS,
             "port": port,
         }
+        if request.transport == "quic":
+            options["transport"] = "quic"
         return Plan(options, port, max(deadline, TLS_TIMEOUT_MS // 1000 + 10))
 
     if kind == "dns":

@@ -193,7 +193,7 @@ interval (at least `min_watch_interval_s`, 60 s by default), and the rules of an
 | `ping` | an ICMP echo request | `count` 1 to 10 |
 | `tcp` | opening a TCP connection | needs a port (`host:port`, or `port`) from the allowed list; `count` 1 to 10; a refusal keeps its time but is not a success |
 | `http` | one request | scheme, port and path come from the URL (query strings are dropped); `follow_redirects` to follow up to 5; timings, status, certificate |
-| `tls` | one TLS handshake with no request after it | the target is a name or an address, with a port from the allowed list (default 443; `host:port`, a URL or `port` give another); the node presents the name (SNI) and checks the certificate against the Mozilla roots. The sample carries the certificate: version, cipher, subject, issuer, validity, whether this node trusts it and why not, the names it is valid for and how many certificates the server sent. A certificate that is not trusted is an `error` (`tls_certificate_invalid`) that keeps all of that. A watch calls it good when it is trusted and has at least 14 days left, and a certificate that is valid but nearly out of time is `degraded`, not `down` |
+| `tls` | one TLS handshake with no request after it (`transport` `quic` makes it a QUIC handshake over UDP offering `h3`, and the sample says `quic` and the protocol agreed) | the target is a name or an address, with a port from the allowed list (default 443; `host:port`, a URL or `port` give another); the node presents the name (SNI) and checks the certificate against the Mozilla roots. The sample carries the certificate: version, cipher, subject, issuer, validity, whether this node trusts it and why not, the names it is valid for and how many certificates the server sent. A certificate that is not trusted is an `error` (`tls_certificate_invalid`) that keeps all of that. A watch calls it good when it is trusted and has at least 14 days left, and a certificate that is valid but nearly out of time is `degraded`, not `down` |
 | `traceroute` | one hop | up to 30 hops, three probes each; `count` 1 to 10 repeats the trace like `mtr` (one more probe per hop and round, a second apart) and a hop then carries how many probes it got (`sent`) and every reply; non-public hops are shown as private; Linux nodes only (rounds need node v0.5.0 or newer) |
 | `dns` | one question to one resolver | the target is a name (an IP address or an internal name is refused); `record_type` `A` (default), `AAAA`, `CNAME`, `MX`, `NS`, `TXT` or `SOA`; `resolver` `system` (default: each node's own resolvers, what people near it get) or `cloudflare`, `google`, `quad9` (that public resolver, asked from every node); `transport` `doh` asks cloudflare or google over HTTPS (port 443, RFC 8484) instead of UDP (quad9 answers DNS over HTTPS only over HTTP/2, which the nodes do not speak, so it is refused with that reason). The backend never resolves the name, so a name that does not exist can be checked |
 
@@ -353,7 +353,7 @@ on the dead worker. The two-instance behaviour is covered by `tests/test_cluster
   targets, IPv6 loopback and an IPv6 traceroute through network namespaces were.
 * The location estimate is only as good as the nodes' coordinates and how close the nearest node is
   (see the table above); it is not a geolocation database. An optional GeoIP database can be set up as a
-  cross-check, but it never feeds the estimate, and geofeeds are not read.
+  cross-check, but it never feeds the estimate. Geofeeds (RFC 8805) are not read: of six well-known networks only Cloudflare publishes one, and only as free text in an ARIN remark ("Geofeed: <url>"), not as the RFC 9632 `geofeed` link a lookup would use; reading them would send every target address to a third-party RDAP service and fetch a URL its owner chose, for evidence that most targets do not have.
 * A task is sent again (once, `task_retries`) only when its backend instance died and the node had
   produced nothing yet. Once a node has produced samples a crash means `interrupted` with the
   partial results kept, because starting over would discard them. A node that drops is never
@@ -441,6 +441,7 @@ Small steps, each one committed and logged in [CHANGELOG.md](CHANGELOG.md).
 - [x] DNS checks (record types, public or per-node resolvers, privacy rules; the comparison view is in the web interface)
 - [x] Community nodes, first slice: a tier per node and token, left out unless asked for, rate limited, kept out of location estimates until verified, a location audit (no signed results or reputation)
 - [x] Traceroute in rounds like `mtr` (loss and spread per hop)
+- [x] QUIC as a transport of the certificate check (an h3 handshake over UDP)
 - [x] DNS over HTTPS as a transport of the DNS check (cloudflare and google; quad9 needs HTTP/2)
 - [x] Certificate checks (`tls`: a handshake with no request; expiry, issuer, names, trust; a watch can alert before it expires)
 - [x] The network and place of each router on a traced path (from the GeoIP databases; the route map is in the web interface)
@@ -448,7 +449,7 @@ Small steps, each one committed and logged in [CHANGELOG.md](CHANGELOG.md).
 - [ ] Over the real public IPv6 internet (needs a host with IPv6 connectivity; neither the development machine nor CI runners have it)
 - [x] Estimated network location: constraint-based, evidence listed, explicit "insufficient evidence"
 - [x] Calibrate the location model against real targets of known location (RIPE Atlas anchors; held-out half reported)
-- [x] A GeoIP / ASN database as a checked second opinion (ruled out by the measurements, or consistent); geofeeds (RFC 8805) not done
+- [x] A GeoIP / ASN database as a checked second opinion (ruled out by the measurements, or consistent); geofeeds (RFC 8805) investigated and not built, see above
 
 ## License
 

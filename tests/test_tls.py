@@ -277,3 +277,62 @@ def test_a_node_without_certificate_checks_is_not_asked_for_one(api: Api) -> Non
         assert response.json()["error"]["code"] == "kind_not_supported"
     finally:
         ws.__exit__(None, None, None)
+
+
+# ---------------------------------------------------------------------------------------------
+# QUIC
+# ---------------------------------------------------------------------------------------------
+
+
+def test_a_certificate_can_be_checked_over_quic_and_the_wrong_transports_are_refused() -> None:
+    plan = _plan("example.com", transport="quic")
+    assert plan.options["transport"] == "quic" and plan.options["port"] == 443
+    assert "transport" not in _plan("example.com").options
+    assert "transport" not in _plan("example.com", transport="tcp").options
+    for wrong in ("udp", "doh"):
+        with pytest.raises(PlanError) as caught:
+            _plan("example.com", transport=wrong)
+        assert caught.value.code == "invalid_option" and "tcp or quic" in caught.value.message
+    # and QUIC is not a way to ask DNS, nor a transport of anything else
+    for kind, transport in (("dns", "quic"), ("dns", "tcp"), ("ping", "quic")):
+        request = CreateMeasurementRequest(target="example.com", kind=kind, transport=transport)  # type: ignore[arg-type]
+        with pytest.raises(PlanError) as caught:
+            plan_measurement(request, parse_target("example.com"), RuntimeSettings())
+        assert caught.value.code == "invalid_option"
+
+
+def test_the_detail_carries_the_transport_and_the_protocol_agreed() -> None:
+    detail = protocol.parse_detail("tls", {**CERT, "transport": "quic", "alpn": "h3"})
+    assert isinstance(detail, TlsDetail) and (detail.transport, detail.alpn) == ("quic", "h3")
+    assert protocol.parse_detail("tls", {**CERT, "transport": "smoke-signals"}) is None
+    assert protocol.parse_detail("tls", {**CERT, "alpn": "x" * 30}) is None
+    cleaned = protocol.parse_detail("tls", {**CERT, "alpn": "h3\x1b"})
+    assert isinstance(cleaned, TlsDetail) and cleaned.alpn == "h3?"
+    options = protocol.TaskOptions.model_validate({"timeout_ms": 8000, "transport": "quic"})
+    assert options.transport == "quic"
+
+
+def test_a_quic_check_reaches_the_node_and_its_result_says_it_was_quic(api: Api) -> None:
+    api.become_admin()
+    _, credential = api.enroll_node()
+    ws, session = connect(api, credential, kinds=ALL_KINDS + ("tls",))
+    try:
+        measurement = _start(api, target="example.com", kind="tls", transport="quic")
+        assert measurement["options"]["transport"] == "quic"
+        task = _task(session)
+        assert task["options"] == {
+            "count": 1,
+            "interval_ms": 1000,
+            "timeout_ms": 8000,
+            "transport": "quic",
+        }
+        quic = {**CERT, "transport": "quic", "alpn": "h3"}
+        _send(session, task, type="sample", seq=0, status="ok", rtt_us=32_000, detail=quic)
+        _complete(session, task)
+        final = api.get(f"/api/v1/measurements/{measurement['id']}").json()
+        sample = final["tasks"][0]["samples"][0]["tls"]
+        assert (sample["transport"], sample["alpn"]) == ("quic", "h3")
+        text = render.render_text(MeasurementOut.model_validate(final))
+        assert "(QUIC, h3)" in text, text
+    finally:
+        ws.__exit__(None, None, None)

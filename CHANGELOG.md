@@ -4,6 +4,18 @@ Progress log for `ipping-backend`, newest first. Each entry is one small, tested
 
 ## Unreleased
 
+### QUIC as a transport of the certificate check
+- `transport` now also names how a `tls` check reaches the server: `tcp` (the default) or `quic`, a QUIC handshake over
+  UDP offering `h3` (the transport of HTTP/3). The same detail, cards and watch rules apply, and the sample adds
+  `transport: "quic"` and `alpn` (the protocol agreed). Each kind refuses the other's values (`udp`/`doh` for a certificate
+  check, `tcp`/`quic` for DNS) with a message that says which are allowed. The plain-text report ends `(QUIC, h3)`.
+- 3 tests (the plan and the refusals, the detail's limits, a measurement through a node) and the example frames `task_tls_quic`
+  and `sample_tls_quic` (also in the node repository). 347 on SQLite and 359 on PostgreSQL.
+- **Geofeeds (RFC 8805) were looked at and not built.** Asking the real registries: of six well-known networks only Cloudflare
+  publishes a geofeed, and only as free text in an ARIN remark ("Geofeed: https://..."), not as the RFC 9632 `geofeed` link;
+  Google, GitHub, Amazon, APNIC and RIPE publish none. Building it would send every target address to a third-party RDAP
+  service and fetch a URL its owner chose, for evidence that most targets do not have. The DB-IP cross-check stays.
+
 ### Community nodes (first slice)
 - Migration `0010`: `nodes.tier` and `enrollment_tokens.tier` (`official` by default, so everything existing is unchanged),
   and `nodes.location_audit`. A token's tier becomes the tier of the node that enrolls with it; an administrator can

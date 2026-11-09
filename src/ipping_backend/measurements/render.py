@@ -59,8 +59,9 @@ def _line(kind: str, task: TaskOut, name: str) -> list[str]:
                 days = (cert.not_after - datetime.now(UTC)).total_seconds() / 86400
                 when = f"in {days:.0f} days" if days >= 0 else f"{-days:.0f} days ago"
                 expiry = f"  expires {cert.not_after.astimezone(UTC):%Y-%m-%d} ({when})"
+            via = f"  (QUIC, {detail.alpn or '?'})" if detail.transport == "quic" else ""
             return [
-                f"{name}  {trust}  {cert.version or '?'}{expiry}  {ms(_us(detail.total_us))} ms"
+                f"{name}  {trust}  {cert.version or '?'}{expiry}  {ms(_us(detail.total_us))} ms{via}"
             ]
         why = (
             "timed out"
