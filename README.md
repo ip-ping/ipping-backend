@@ -8,8 +8,8 @@ This repository is the coordinator. It validates targets, schedules work onto no
 aggregates results, estimates where an address appears to be, and owns the contracts the other two
 repositories build against.
 
-Current release: **v0.4.1** (database migration head `0008`). Nodes of any earlier version keep
-working for ping; TCP, HTTP and traceroute need node v0.3.0 or newer, DNS checks need node v0.4.0, and certificate checks need the node release after it.
+Current release: **v0.5.0** (database migration head `0009`). Nodes of any earlier version keep
+working for ping; TCP, HTTP and traceroute need node v0.3.0 or newer, DNS checks need node v0.4.0, and traceroute rounds and certificate checks need node v0.5.0.
 
 | Repository | Role |
 |---|---|
@@ -194,7 +194,7 @@ interval (at least `min_watch_interval_s`, 60 s by default), and the rules of an
 | `tcp` | opening a TCP connection | needs a port (`host:port`, or `port`) from the allowed list; `count` 1 to 10; a refusal keeps its time but is not a success |
 | `http` | one request | scheme, port and path come from the URL (query strings are dropped); `follow_redirects` to follow up to 5; timings, status, certificate |
 | `tls` | one TLS handshake with no request after it | the target is a name or an address, with a port from the allowed list (default 443; `host:port`, a URL or `port` give another); the node presents the name (SNI) and checks the certificate against the Mozilla roots. The sample carries the certificate: version, cipher, subject, issuer, validity, whether this node trusts it and why not, the names it is valid for and how many certificates the server sent. A certificate that is not trusted is an `error` (`tls_certificate_invalid`) that keeps all of that. A watch calls it good when it is trusted and has at least 14 days left, and a certificate that is valid but nearly out of time is `degraded`, not `down` |
-| `traceroute` | one hop | up to 30 hops, three probes each; `count` 1 to 10 repeats the trace like `mtr` (one more probe per hop and round, a second apart) and a hop then carries how many probes it got (`sent`) and every reply; non-public hops are shown as private; Linux nodes only (rounds need node v0.4.1 or newer) |
+| `traceroute` | one hop | up to 30 hops, three probes each; `count` 1 to 10 repeats the trace like `mtr` (one more probe per hop and round, a second apart) and a hop then carries how many probes it got (`sent`) and every reply; non-public hops are shown as private; Linux nodes only (rounds need node v0.5.0 or newer) |
 | `dns` | one question to one resolver | the target is a name (an IP address or an internal name is refused); `record_type` `A` (default), `AAAA`, `CNAME`, `MX`, `NS`, `TXT` or `SOA`; `resolver` `system` (default: each node's own resolvers, what people near it get) or `cloudflare`, `google`, `quad9` (that public resolver, asked from every node). The backend never resolves the name, so a name that does not exist can be checked |
 
 Each sample is one probe: for `ping` and `tcp` the round trip (a refused TCP connection is an `error`
@@ -370,6 +370,7 @@ first because the application release pins it.
 
 | Release | Database head | Notes |
 |---|---|---|
+| v0.5.0 | `0009` | traceroute in rounds like `mtr`; the path endpoint (networks and places of a route's routers); certificate checks (`tls` is enabled for deployments that had every kind on); a fix to the text cleaner |
 | v0.4.1, v0.4.0 | `0008` | DNS checks (`dns` is enabled for deployments that had every kind on); GeoIP / ASN cross-check; watches; API keys and the text endpoint |
 | v0.3.0 | `0005` | TCP, HTTP and traceroute; tasks sent again when their instance dies; calibrated location model |
 | v0.2.0 | `0002` | estimated location; signed releases |
@@ -390,7 +391,7 @@ Small steps, each one committed and logged in [CHANGELOG.md](CHANGELOG.md).
 - [x] Dockerfile, CI (lint, types, tests, contract-drift check) and Docker Hub publishing
 - [x] API tests also run on PostgreSQL
 - [x] Release workflow: tag or manual run, dry run, version check, image + wheel + lock + contracts
-- [x] Tagged releases: v0.1.0, v0.2.0, v0.3.0, v0.4.0, v0.4.1
+- [x] Tagged releases: v0.1.0, v0.2.0, v0.3.0, v0.4.0, v0.4.1, v0.5.0
 - [x] More than one backend process or host (shared presence, owner-sends dispatch, reaper)
 - [ ] Per-session / per-IP quota tuning from real traffic
 - [x] TCP, HTTP and traceroute (protocol, planning, validation, tests; node and frontend shipped in v0.3.0)

@@ -2,7 +2,11 @@
 
 Progress log for `ipping-backend`, newest first. Each entry is one small, tested step.
 
-## Unreleased
+## v0.5.0 (2026-11-09)
+
+Traceroute in rounds like `mtr`, the networks and places of a route's routers, and certificate checks. The database
+migrates to `0009` (`tls` is added to the saved kind list of a deployment that never narrowed it). Nodes need v0.5.0
+for rounds and certificate checks; an older node keeps working for everything else.
 
 ### 2026-11-08: certificate checks
 - A new kind, `tls`: ask every node for a TLS handshake with the target (a name, presented to the server and
@@ -52,7 +56,7 @@ Progress log for `ipping-backend`, newest first. Each entry is one small, tested
 - Tests: planning, cost and deadline, the hop model's limits (more answers than probes, no probes), the
   fixtures `task_traceroute_rounds` and `sample_hop_rounds` (also in the node repository), and a measurement
   through a node with four rounds. Contracts regenerated.
-- Needs node v0.4.1 or newer to repeat; an older node ignores `count` for a traceroute and traces once.
+- Needs node v0.5.0 or newer to repeat; an older node ignores `count` for a traceroute and traces once.
 
 ## v0.4.1 (2026-11-07)
 
