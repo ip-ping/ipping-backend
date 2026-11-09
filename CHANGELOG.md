@@ -2,7 +2,11 @@
 
 Progress log for `ipping-backend`, newest first. Each entry is one small, tested step.
 
-## Unreleased
+## v0.6.0 (2026-11-09)
+
+Community nodes (a first slice), DNS over HTTPS, and QUIC for the certificate check. The database migrates to `0010` (a tier on
+nodes and enrollment tokens, `official` for everything that exists, and a stored location audit). Nodes need v0.6.0 for DNS over
+HTTPS and QUIC; an older node keeps working for everything else.
 
 ### QUIC as a transport of the certificate check
 - `transport` now also names how a `tls` check reaches the server: `tcp` (the default) or `quic`, a QUIC handshake over
@@ -51,7 +55,7 @@ Progress log for `ipping-backend`, newest first. Each entry is one small, tested
   `task_dns_doh` and `sample_dns_doh` (also in the node repository).
 - 12 tests: the plan for each resolver, plain DNS unchanged, the refusals and their reasons, the detail and option limits,
   a measurement through a node, the text endpoint. 329 on SQLite and 341 on PostgreSQL.
-- Needs a node newer than v0.5.1 to ask over HTTPS; an older node would ignore `transport` and ask over UDP, so the
+- Needs node v0.6.0 to ask over HTTPS; an older node would ignore `transport` and ask over UDP, so the
   result would not say `doh` (it is shown by what the node reports, not by what was asked).
 
 ## v0.5.1 (2026-11-09)
