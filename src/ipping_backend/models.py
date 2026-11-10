@@ -161,7 +161,11 @@ class Measurement(Base):
     target_host: Mapped[str] = mapped_column(String(255))
     target_ip: Mapped[str | None] = mapped_column(String(45), nullable=True)
     resolved_ips: Mapped[list[str]] = mapped_column(JSON, default=list)
-    dns_mode: Mapped[str] = mapped_column(String(16), default="fixed")
+    dns_mode: Mapped[str] = mapped_column(String(16), default="regional")
+    # The node that resolved the name for everyone (a "fixed" measurement asked to be resolved by one node), as it
+    # was when the measurement began. None: the nodes resolved it themselves, or the backend did, or the target is an
+    # address.
+    resolved_by: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     family: Mapped[str] = mapped_column(String(8), default="auto")
     options: Mapped[dict[str, Any]] = mapped_column(JSON)
     owner_session_id: Mapped[str | None] = mapped_column(String(64), nullable=True)

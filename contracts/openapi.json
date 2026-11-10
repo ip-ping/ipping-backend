@@ -1,6 +1,32 @@
 {
   "components": {
     "schemas": {
+      "AddressGroupOut": {
+        "description": "One address that some of the nodes measured, when they did not all measure the same one.",
+        "properties": {
+          "ip": {
+            "title": "Ip",
+            "type": "string"
+          },
+          "nodes": {
+            "description": "How many nodes measured this address",
+            "title": "Nodes",
+            "type": "integer"
+          },
+          "selected": {
+            "description": "Whether the estimate is for this address",
+            "title": "Selected",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ip",
+          "nodes",
+          "selected"
+        ],
+        "title": "AddressGroupOut",
+        "type": "object"
+      },
       "AdminNode": {
         "properties": {
           "asn": {
@@ -647,8 +673,8 @@
             "title": "Countries"
           },
           "dns_mode": {
-            "default": "fixed",
-            "description": "fixed: resolve once and have every node probe the same address (use this for location estimates). regional: each node resolves the hostname itself.",
+            "default": "regional",
+            "description": "regional (the default): each node resolves the hostname itself, so each gets the address that is near it. fixed: resolve it once and have every node probe the same address; `resolve_node_id` says which node resolves it (without one, the backend does).",
             "enum": [
               "fixed",
               "regional"
@@ -742,6 +768,19 @@
             ],
             "description": "dns only: the record type to ask for (default A)",
             "title": "Record Type"
+          },
+          "resolve_node_id": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "With dns_mode fixed and a hostname: the node that resolves it (an online node that can run DNS checks; any tier, since choosing it is a choice). Every node then probes the address that node got. Ignored for an IP address; refused for a dns check and with dns_mode regional.",
+            "title": "Resolve Node Id"
           },
           "resolver": {
             "anyOf": [
@@ -2156,6 +2195,15 @@
             ],
             "description": "A configured GeoIP database's answer, checked against the nodes"
           },
+          "groups": {
+            "default": [],
+            "description": "When each node resolved the name itself and they did not all get the same address: the addresses and how many nodes measured each. The estimate is for the selected one (`?ip=` chooses). Empty when every node measured one address.",
+            "items": {
+              "$ref": "#/components/schemas/AddressGroupOut"
+            },
+            "title": "Groups",
+            "type": "array"
+          },
           "likely": {
             "anyOf": [
               {
@@ -2606,6 +2654,17 @@
           },
           "options": {
             "$ref": "#/components/schemas/MeasurementOptions"
+          },
+          "resolved_by": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NodeInfo"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The node that resolved the name for every node, when one was asked to"
           },
           "shared": {
             "title": "Shared",
@@ -4634,7 +4693,8 @@
             "title": "Count"
           },
           "dns_mode": {
-            "default": "fixed",
+            "default": "regional",
+            "description": "regional: each node resolves the name itself; fixed: the backend resolves it once",
             "enum": [
               "fixed",
               "regional"
@@ -5334,7 +5394,7 @@
   },
   "info": {
     "title": "ipping backend",
-    "version": "0.8.1"
+    "version": "0.9.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -6876,6 +6936,24 @@
               "title": "Measurement Id",
               "type": "string"
             }
+          },
+          {
+            "description": "When the nodes resolved the name to different addresses (`groups` in the answer): estimate for this one instead of the one most nodes measured",
+            "in": "query",
+            "name": "ip",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "When the nodes resolved the name to different addresses (`groups` in the answer): estimate for this one instead of the one most nodes measured",
+              "title": "Ip"
+            }
           }
         ],
         "responses": {
@@ -7333,13 +7411,32 @@
             "name": "dns_mode",
             "required": false,
             "schema": {
-              "default": "fixed",
+              "default": "regional",
               "enum": [
                 "fixed",
                 "regional"
               ],
               "title": "Dns Mode",
               "type": "string"
+            }
+          },
+          {
+            "description": "With dns_mode=fixed: the node that resolves the name",
+            "in": "query",
+            "name": "resolve_node_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 32,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "With dns_mode=fixed: the node that resolves the name",
+              "title": "Resolve Node Id"
             }
           },
           {

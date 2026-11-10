@@ -45,10 +45,21 @@ class CreateMeasurementRequest(BaseModel):
         default=False, description="http only: follow redirects (up to the deployment's limit)"
     )
     dns_mode: Literal["fixed", "regional"] = Field(
-        default="fixed",
+        default="regional",
         description=(
-            "fixed: resolve once and have every node probe the same address (use this for "
-            "location estimates). regional: each node resolves the hostname itself."
+            "regional (the default): each node resolves the hostname itself, so each gets the "
+            "address that is near it. fixed: resolve it once and have every node probe the same "
+            "address; `resolve_node_id` says which node resolves it (without one, the backend does)."
+        ),
+    )
+    resolve_node_id: str | None = Field(
+        default=None,
+        max_length=32,
+        description=(
+            "With dns_mode fixed and a hostname: the node that resolves it (an online node that "
+            "can run DNS checks; any tier, since choosing it is a choice). Every node then probes "
+            "the address that node got. Ignored for an IP address; refused for a dns check and "
+            "with dns_mode regional."
         ),
     )
     family: Literal["auto", "4", "6"] = "auto"
@@ -207,6 +218,10 @@ class MeasurementOut(BaseModel):
     status: Literal["running", "completed", "cancelled", "interrupted"]
     target: TargetOut
     dns_mode: Literal["fixed", "regional"]
+    resolved_by: NodeInfo | None = Field(
+        default=None,
+        description="The node that resolved the name for every node, when one was asked to",
+    )
     family: Literal["auto", "4", "6"]
     options: MeasurementOptions
     shared: bool

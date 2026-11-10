@@ -59,6 +59,22 @@ class Plan:
     deadline_s: int
 
 
+def plan_lookup(record_type: str) -> Plan:
+    """One question to a node's own resolvers, asked on the backend's behalf to learn an address.
+
+    It is not a measurement a person asked for, so it does not depend on which kinds the administrator
+    turned on (a person may not ask for a dns check and still choose a node to resolve a name).
+    """
+    options = {
+        "count": 1,
+        "interval_ms": INTERVAL_MS,
+        "timeout_ms": DNS_TIMEOUT_MS,
+        "record_type": record_type,
+        "resolver": "system",
+    }
+    return Plan(options, None, DNS_TIMEOUT_MS // 1000 + 5)
+
+
 def sample_limit(kind: str, options: dict[str, Any]) -> int:
     """The most samples one task of this kind can produce."""
     if kind in ("http", "dns", "tls"):

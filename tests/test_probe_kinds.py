@@ -245,7 +245,7 @@ def test_tcp_measurement_counts_refusals_as_answers_from_the_host_but_not_as_con
     _, credential = api.enroll_node()
     ws, session = connect(api, credential, kinds=ALL_KINDS)
     try:
-        measurement = _start(api, target="example.com:443", kind="tcp", count=4)
+        measurement = _start(api, target="example.com:443", kind="tcp", count=4, dns_mode="fixed")
         assert measurement["kind"] == "tcp" and measurement["options"]["port"] == 443
         task = _task(session)
         assert task["kind"] == "tcp"
@@ -287,6 +287,7 @@ def test_http_measurement_asks_for_the_name_and_keeps_only_validated_detail(api:
             target="https://user:pw@example.com/a/b?token=secret",
             kind="http",
             follow_redirects=True,
+            dns_mode="fixed",
         )
         assert "secret" not in json.dumps(measurement) and "pw" not in json.dumps(measurement)
         assert (

@@ -43,7 +43,11 @@ async def text_measurement(
     follow_redirects: bool = False,
     include_community: bool = False,
     family: Literal["auto", "4", "6"] = "auto",
-    dns_mode: Literal["fixed", "regional"] = "fixed",
+    dns_mode: Literal["fixed", "regional"] = "regional",
+    resolve_node_id: Annotated[
+        str | None,
+        Query(max_length=32, description="With dns_mode=fixed: the node that resolves the name"),
+    ] = None,
     countries: Annotated[str | None, Query(description="Comma-separated ISO country codes")] = None,
     wait: Annotated[float, Query(ge=1, le=30, description="Seconds to wait for the result")] = 20,
 ) -> PlainTextResponse:
@@ -66,6 +70,7 @@ async def text_measurement(
             include_community=include_community,
             family=family,
             dns_mode=dns_mode,
+            resolve_node_id=resolve_node_id,
             countries=countries.split(",") if countries else None,
         )
     except ValidationError as exc:

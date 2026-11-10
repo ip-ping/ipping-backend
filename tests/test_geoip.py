@@ -162,7 +162,9 @@ def test_the_worst_offender_is_named() -> None:
 def _measure(api: Api, verified: bool) -> dict[str, Any]:
     nodes = fleet(api, SITES, verified=verified)
     try:
-        mid = api.post("/api/v1/measurements", {"target": "example.com", "count": 4}).json()["id"]
+        mid = api.post(
+            "/api/v1/measurements", {"target": "example.com", "count": 4, "dns_mode": "fixed"}
+        ).json()["id"]
         for _, session, rtt in nodes:
             answer(session, rtt)
         return api.get(f"/api/v1/measurements/{mid}/location").json()  # type: ignore[no-any-return]

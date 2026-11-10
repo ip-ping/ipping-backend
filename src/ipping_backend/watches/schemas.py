@@ -19,7 +19,10 @@ class WatchIn(BaseModel):
     port: int | None = Field(default=None, ge=1, le=65535)
     count: int | None = Field(default=None, ge=1, le=10)
     follow_redirects: bool = False
-    dns_mode: Literal["fixed", "regional"] = "fixed"
+    dns_mode: Literal["fixed", "regional"] = Field(
+        default="regional",
+        description="regional: each node resolves the name itself; fixed: the backend resolves it once",
+    )
     family: Literal["auto", "4", "6"] = "auto"
     record_type: DnsRecordType | None = None
     resolver: Literal["system", "cloudflare", "google", "quad9"] | None = None

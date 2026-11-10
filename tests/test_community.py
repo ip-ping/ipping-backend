@@ -159,7 +159,8 @@ def test_a_volunteers_unverified_place_cannot_move_a_location_estimate(api: Api)
     ws, session = connect(api, liar_cred)
     try:
         mid = api.post(
-            "/api/v1/measurements", {"target": "example.com", "count": 4, "include_community": True}
+            "/api/v1/measurements",
+            {"target": "example.com", "count": 4, "include_community": True, "dns_mode": "fixed"},
         ).json()["id"]
         for _, node_session, rtt in nodes:
             answer(node_session, rtt)

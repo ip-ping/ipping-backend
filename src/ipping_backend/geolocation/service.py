@@ -15,6 +15,7 @@ from .estimate import haversine_km
 from .geofeed import Entry, Geofeeds, host_of
 from .geoip import GeoIp, GeoPlace, rule_out, valid_ip
 from .schemas import (
+    AddressGroupOut,
     AlternativeOut,
     AsnOut,
     ClosestOut,
@@ -67,8 +68,40 @@ def _observations(tasks: list[MeasurementTask]) -> list[E.Observation]:
     return result
 
 
+class UnknownAddress(LookupError):
+    """The address asked for was not measured by any node."""
+
+
+def _address_of(task: MeasurementTask, measurement: Measurement) -> str | None:
+    """The address this node measured. A fixed measurement gave every node the same one."""
+    if task.tested_ip:
+        return task.tested_ip
+    return measurement.target_ip if measurement.dns_mode == "fixed" else None
+
+
+def _groups(
+    tasks: list[MeasurementTask], measurement: Measurement
+) -> dict[str, list[MeasurementTask]]:
+    """The tasks by the address they measured, the address most nodes measured first.
+
+    When each node resolves the name itself they do not always get one address (geo-DNS, a CDN), and the round
+    trips to different servers cannot be put into one estimate; the nodes that agree are.
+    """
+    by_ip: dict[str, list[MeasurementTask]] = {}
+    for task in tasks:
+        ip = _address_of(task, measurement)
+        if ip is not None:
+            by_ip.setdefault(ip, []).append(task)
+    return dict(sorted(by_ip.items(), key=lambda item: (-len(item[1]), item[0])))
+
+
 def _to_out(
-    measurement: Measurement, estimate: E.Estimate, observations: list[E.Observation]
+    measurement: Measurement,
+    estimate: E.Estimate,
+    observations: list[E.Observation],
+    *,
+    target_ip: str | None,
+    groups: dict[str, list[MeasurementTask]],
 ) -> LocationEstimateOut:
     used = {o.node_id for o in estimate.evidence}
 
@@ -89,7 +122,7 @@ def _to_out(
         status=estimate.status,
         summary=estimate.summary,
         model_version=E.MODEL_VERSION,
-        target_ip=measurement.target_ip,
+        target_ip=target_ip,
         likely=place(estimate.likely) if estimate.likely else None,
         strength=estimate.strength,
         alternatives=[
@@ -110,9 +143,31 @@ def _to_out(
             for o in sorted(observations, key=lambda o: o.rtt_ms)
         ],
         nodes_total=estimate.nodes_total,
-        warnings=list(estimate.warnings),
+        warnings=_address_warning(target_ip, groups) + list(estimate.warnings),
         limitations=list(estimate.limitations),
+        groups=_group_outs(target_ip, groups),
     )
+
+
+def _group_outs(
+    selected: str | None, groups: dict[str, list[MeasurementTask]]
+) -> list[AddressGroupOut]:
+    if len(groups) < 2:
+        return []
+    return [
+        AddressGroupOut(ip=ip, nodes=len(t), selected=ip == selected) for ip, t in groups.items()
+    ]
+
+
+def _address_warning(selected: str | None, groups: dict[str, list[MeasurementTask]]) -> list[str]:
+    if len(groups) < 2 or selected not in groups:
+        return []
+    others = sum(len(t) for ip, t in groups.items() if ip != selected)
+    return [
+        f"The nodes resolved the name to {len(groups)} different addresses. This estimate is for "
+        f"{selected}, measured by {len(groups[selected])} nodes; the other {others} measured "
+        "something else and are left out."
+    ]
 
 
 def _checked(
@@ -224,11 +279,15 @@ async def location_for(
     measurement: Measurement,
     geoip: GeoIp | None = None,
     geofeeds: Geofeeds | None = None,
+    ip: str | None = None,
 ) -> LocationEstimateOut:
-    return with_geofeed(with_geoip(await _stored_or_new(db, measurement), geoip), geofeeds)
+    """The estimate for the address most nodes measured, or for `ip` when asked (see `UnknownAddress`)."""
+    return with_geofeed(with_geoip(await _stored_or_new(db, measurement, ip), geoip), geofeeds)
 
 
-async def _stored_or_new(db: AsyncSession, measurement: Measurement) -> LocationEstimateOut:
+async def _stored_or_new(
+    db: AsyncSession, measurement: Measurement, ip: str | None = None
+) -> LocationEstimateOut:
     if measurement.status == "running":
         return _unavailable(
             measurement, "pending", "The estimate is made once every node has finished."
@@ -239,16 +298,13 @@ async def _stored_or_new(db: AsyncSession, measurement: Measurement) -> Location
             "unavailable",
             "An estimate needs round-trip times to the target. Run a ping or TCP measurement.",
         )
-    if measurement.dns_mode != "fixed" or not measurement.target_ip:
-        return _unavailable(
-            measurement,
-            "unavailable",
-            "An estimate needs every node to measure the same address. Run the measurement with "
-            "“Same IP for every node”.",
-        )
 
     stored = await db.get(LocationEstimate, measurement.id)
-    if stored is not None and stored.model_version == E.MODEL_VERSION:
+    if (
+        stored is not None
+        and stored.model_version == E.MODEL_VERSION
+        and (ip is None or ip == stored.result.get("target_ip"))
+    ):
         return LocationEstimateOut.model_validate(stored.result)
 
     tasks = list(
@@ -258,10 +314,23 @@ async def _stored_or_new(db: AsyncSession, measurement: Measurement) -> Location
             )
         ).scalars()
     )
-    observations = _observations(tasks)
+    groups = _groups(tasks, measurement)
+    if not groups:
+        return _unavailable(
+            measurement,
+            "unavailable",
+            "No node reported which address it measured, so there is nothing to estimate from.",
+        )
+    chosen = ip if ip is not None else next(iter(groups))
+    if chosen not in groups:
+        raise UnknownAddress(chosen)
+    group_tasks = groups[chosen]
+    observations = _observations(group_tasks)
     estimate = await asyncio.to_thread(E.estimate, observations)
-    estimate.nodes_total = len(tasks)
-    out = _to_out(measurement, estimate, observations)
+    estimate.nodes_total = len(group_tasks)
+    out = _to_out(measurement, estimate, observations, target_ip=chosen, groups=groups)
+    if ip is not None and chosen != next(iter(groups)):
+        return out  # another address than the usual one: worked out for this request only
 
     # Results are immutable once a measurement has finished, so the estimate is stored; it is redone
     # only when the model changes.

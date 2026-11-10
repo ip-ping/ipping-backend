@@ -18,9 +18,10 @@ from ..deps import (
     csrf_protect,
 )
 from ..errors import ApiError
+from ..geolocation.geoip import valid_ip
 from ..geolocation.path import path_for
 from ..geolocation.schemas import LocationEstimateOut, PathOut
-from ..geolocation.service import location_for
+from ..geolocation.service import UnknownAddress, location_for
 from ..models import ApiKey, Measurement, MeasurementEvent, User, WebSession
 from . import schemas
 from .engine import Owner
@@ -125,11 +126,35 @@ async def get_measurement(
 
 @router.get("/{measurement_id}/location", response_model=LocationEstimateOut)
 async def estimated_location(
-    measurement_id: str, request: Request, session: OptionalSession, key: OptionalApiKey, db: Db
+    measurement_id: str,
+    request: Request,
+    session: OptionalSession,
+    key: OptionalApiKey,
+    db: Db,
+    ip: Annotated[
+        str | None,
+        Query(
+            description=(
+                "When the nodes resolved the name to different addresses (`groups` in the answer): "
+                "estimate for this one instead of the one most nodes measured"
+            )
+        ),
+    ] = None,
 ) -> LocationEstimateOut:
     """Where the target address appears to be, from the nodes' round-trip times (experimental)."""
     measurement = await _authorized(db, measurement_id, session, key)
-    return await location_for(db, measurement, request.app.state.geoip, request.app.state.geofeeds)
+    if ip is not None and valid_ip(ip) is None:
+        raise ApiError(422, "invalid_address", "That is not an IP address.")
+    try:
+        return await location_for(
+            db,
+            measurement,
+            request.app.state.geoip,
+            request.app.state.geofeeds,
+            valid_ip(ip),
+        )
+    except UnknownAddress:
+        raise ApiError(404, "unknown_address", "No node measured that address.") from None
 
 
 @router.get("/{measurement_id}/path", response_model=PathOut)

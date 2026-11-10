@@ -1,3 +1,3 @@
 """ipping backend: API, node coordination and result aggregation."""
 
-__version__ = "0.8.1"
+__version__ = "0.9.0"

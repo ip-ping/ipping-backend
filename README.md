@@ -8,7 +8,7 @@ This repository is the coordinator. It validates targets, schedules work onto no
 aggregates results, estimates where an address appears to be, and owns the contracts the other two
 repositories build against.
 
-Current release: **v0.8.0** (database migration head `0011`). Nodes of any earlier version keep
+Current release: **v0.9.0** (database migration head `0012`). Nodes of any earlier version keep
 working for ping; TCP, HTTP and traceroute need node v0.3.0 or newer, DNS checks need node v0.4.0, traceroute rounds and certificate checks need node v0.5.0, and DNS over HTTPS and QUIC need node v0.6.0 (DNS over HTTPS to quad9 needs v0.7.0, which speaks HTTP/2); a measurement that asks for either goes only to nodes that have it.
 
 | Repository | Role |
@@ -116,7 +116,7 @@ Interactive docs are at `/api/docs`; the machine-readable contract is `contracts
 | | |
 |---|---|
 | `GET /api/v1/session` | start a browser session and get its CSRF token (writes send it as `X-CSRF-Token`) |
-| `POST /api/v1/measurements` | start one: `{"target": "example.com:443", "kind": "tcp", "count": 4}`; `kind` is `ping`, `tcp`, `http`, `traceroute`, `dns` or `tls`; also `port` (tcp, http, tls), `record_type`, `resolver` and `transport` (dns), `follow_redirects`, `dns_mode` (`fixed` / `regional`), `family`, `node_ids`, `countries` |
+| `POST /api/v1/measurements` | start one: `{"target": "example.com:443", "kind": "tcp", "count": 4}`; `kind` is `ping`, `tcp`, `http`, `traceroute`, `dns` or `tls`; also `port` (tcp, http, tls), `record_type`, `resolver` and `transport` (dns), `follow_redirects`, `dns_mode` (`regional`, the default: each node resolves a hostname itself; or `fixed`, one address for every node) with `resolve_node_id` (the node that resolves it for the rest), `family`, `node_ids`, `countries` |
 | `GET /api/v1/measurements/{id}` | the measurement with its tasks, samples (`http` or `hop` details) and summaries |
 | `GET /api/v1/measurements/{id}/events` | live Server-Sent Events, resumable with `Last-Event-ID` |
 | `GET /api/v1/measurements/{id}/location` | the estimated location (ping and TCP) |
@@ -236,8 +236,11 @@ method is built around what it can and cannot know:
 3. **Honest output.** The result lists its evidence, the other plausible regions, warnings, and a
    strength label (`low`, `moderate`, `strong`), never a percentage or radius for *this* answer.
    "Insufficient evidence" (fewer than 3 nodes with known coordinates, or no node closer than 40 ms)
-   and "inconclusive" are normal answers. It needs a measurement made with "same IP for every node",
-   so every node probed the same address.
+   and "inconclusive" are normal answers. It needs the nodes to have measured the same address.
+   When each node resolved the name itself (the default) and they did not all get one, the nodes are
+   grouped by the address they measured: the estimate is for the address most of them measured, the
+   others are listed under `groups`, and `?ip=` asks for another. Round trips to different servers
+   are never put into one estimate.
 
 **How well does it work?** Checked on real measurements, not only synthetic ones. The data
 (`calibration/`, collected by `scripts/collect_atlas.py`) is public [RIPE Atlas](https://atlas.ripe.net)
@@ -399,6 +402,18 @@ operator or users are. To redo this: `uv run python scripts/collect_atlas.py` (n
 * Hostnames are resolved once and **every** address must be public (loopback, private,
   link-local, multicast, reserved, NAT64/6to4/Teredo and denylisted ranges are refused); the
   pinned address is what nodes probe. Nodes repeat the check themselves.
+* **Who resolves a hostname** is a choice per measurement (`dns_mode`). By default (`regional`) each
+  node resolves it itself, so each probes the address that is near it (the backend still resolves it
+  once, to apply the policy above). With `fixed` and a `resolve_node_id`, that one node asks its own
+  resolvers (A, and AAAA when IPv6 is wanted or there is no A record) and every node probes the address
+  it found; with `fixed` alone the backend resolves it. What a node found is held to the same policy as
+  an address the backend resolved: a private address or a denylisted range is refused, and a node whose
+  resolver returned a private address (which the node never reports, only counts) refuses the
+  measurement. The node can be any online approved node that can ask DNS questions, a volunteer's too
+  (it is chosen by name, like `node_ids`, and counts against its per-minute limit). The question is a
+  DNS check on that node that nobody sees: it is removed once answered. A node that does not answer in
+  about ten seconds fails the measurement with `dns_failure` and the node's name; one that is offline
+  is `node_unavailable`. Nothing is added to the node: it is the same DNS check as any other.
 * Browser writes need a matching `Origin` and an `X-CSRF-Token`. Sessions are rotated at sign-in.
 * Node credentials and enrollment tokens are 256-bit random values stored only as hashes.
   Enrollment tokens are single-use and expire; new nodes stay `pending` until an admin approves.
@@ -465,6 +480,7 @@ first because the application release pins it.
 
 | Release | Database head | Notes |
 |---|---|---|
+| v0.9.0 | `0012` | **each node resolves a hostname itself by default** (`dns_mode` is `regional`; it was `fixed`), and `resolve_node_id` lets one chosen node resolve it for every node (migration `0012` adds `measurements.resolved_by`); the location estimate works for names the nodes resolved themselves, by the address each measured (`groups`, `?ip=`) |
 | v0.8.1 | `0011` | fix: a node's place from the IP data is only used where it agrees with the place the node reported or an administrator typed (a different country, a position or a known city more than 300 km away is a conflict; the provider and AS number are still filled in), and a record with no city is not used as a position |
 | v0.8.0 | `0011` | IP data: MaxMind GeoLite2 downloaded and kept up to date from the admin page, `GET /api/v1/ip`, and nodes filled in from their address (migration `0011` adds `nodes.auto_fields`) |
 | v0.7.0 | `0010` | DNS over HTTPS to Quad9 (over HTTP/2, so only to nodes of v0.7.0 or newer); geofeeds (RFC 8805) from the feeds an administrator lists, shown next to the GeoIP place and checked the same way (`ipping-backend geofeed-update`) |
@@ -555,6 +571,7 @@ Small steps, each one committed and logged in [CHANGELOG.md](CHANGELOG.md).
 - [x] Estimated network location: constraint-based, evidence listed, explicit "insufficient evidence"
 - [x] Calibrate the location model against real targets of known location (RIPE Atlas anchors; held-out half reported)
 - [x] MaxMind GeoLite2 from the admin page (account ID and license key, downloaded, checked, kept up to date), a lookup API at `/api/v1/ip` with settings, and nodes filled in from their address
+- [x] Name resolution is a choice: each node resolves a hostname itself (default), or one chosen node resolves it for all; the location estimate follows the address each node measured
 - [x] A GeoIP / ASN database as a checked second opinion (ruled out by the measurements, or consistent), and geofeeds (RFC 8805) from the feeds an administrator lists, checked the same way
 
 ## License

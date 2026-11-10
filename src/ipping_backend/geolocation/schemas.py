@@ -78,6 +78,14 @@ class AsnOut(BaseModel):
     organization: str
 
 
+class AddressGroupOut(BaseModel):
+    """One address that some of the nodes measured, when they did not all measure the same one."""
+
+    ip: str
+    nodes: int = Field(description="How many nodes measured this address")
+    selected: bool = Field(description="Whether the estimate is for this address")
+
+
 class LocationEstimateOut(BaseModel):
     status: Literal["estimated", "inconclusive", "insufficient_evidence", "unavailable", "pending"]
     summary: str
@@ -96,6 +104,14 @@ class LocationEstimateOut(BaseModel):
     limitations: list[str] = []
     geoip: GeoIpOut | None = Field(
         default=None, description="A configured GeoIP database's answer, checked against the nodes"
+    )
+    groups: list[AddressGroupOut] = Field(
+        default=[],
+        description=(
+            "When each node resolved the name itself and they did not all get the same address: the "
+            "addresses and how many nodes measured each. The estimate is for the selected one "
+            "(`?ip=` chooses). Empty when every node measured one address."
+        ),
     )
     geofeed: GeoIpOut | None = Field(
         default=None,

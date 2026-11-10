@@ -91,7 +91,9 @@ def test_a_key_starts_and_reads_its_own_measurements_without_a_session(api: Api)
             == 401
         )
         created = api.client.post(
-            "/api/v1/measurements", json={"target": "example.com", "count": 1}, headers=headers
+            "/api/v1/measurements",
+            json={"target": "example.com", "count": 1, "dns_mode": "fixed"},
+            headers=headers,
         )
         assert created.status_code == 201, created.text
         measurement_id = created.json()["id"]
@@ -247,7 +249,7 @@ def test_the_text_endpoint_waits_for_the_answer_and_prints_it(api: Api) -> None:
 
         def call() -> None:
             result["response"] = api.client.get(
-                "/api/v1/text?target=example.com&count=2&wait=10", headers=headers
+                "/api/v1/text?target=example.com&count=2&wait=10&dns_mode=fixed", headers=headers
             )
 
         thread = threading.Thread(target=call)

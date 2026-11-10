@@ -194,7 +194,7 @@ def test_the_node_is_asked_for_a_handshake_and_its_certificate_is_kept(api: Api)
     _, credential = api.enroll_node()
     ws, session = connect(api, credential, kinds=ALL_KINDS + ("tls",))
     try:
-        measurement = _start(api, target="example.com", kind="tls")
+        measurement = _start(api, target="example.com", kind="tls", dns_mode="fixed")
         assert measurement["kind"] == "tls" and measurement["options"]["port"] == 443
         task = _task(session)
         assert task["kind"] == "tls"

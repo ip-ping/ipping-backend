@@ -286,7 +286,9 @@ def test_a_task_the_node_had_not_started_is_sent_again_when_its_instance_dies(pa
     _, credential = pair.a.enroll_node()
     first, first_session = connect(pair.a, credential)
     try:
-        measurement = pair.b.post("/api/v1/measurements", {"target": "example.com"}).json()
+        measurement = pair.b.post(
+            "/api/v1/measurements", {"target": "example.com", "dns_mode": "fixed"}
+        ).json()
         original = json.loads(first_session.receive_text())
         crash(pair)
 

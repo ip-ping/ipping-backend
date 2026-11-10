@@ -53,7 +53,7 @@ from ..security.targets import (
     system_resolver,
 )
 from . import schemas
-from .plan import PlanError, plan_measurement, probe_cost, sample_limit
+from .plan import PlanError, plan_lookup, plan_measurement, probe_cost, sample_limit
 from .schemas import TASK_ACTIVE, TASK_TERMINAL
 
 log = logging.getLogger(__name__)
@@ -107,6 +107,23 @@ def _sample_out(sample: Sample, kind: str = "ping") -> schemas.SampleOut:
     )
 
 
+def _node_info(node: Node) -> schemas.NodeInfo:
+    """A node as a result shows it, frozen when the measurement begins."""
+    return schemas.NodeInfo(
+        id=node.id,
+        name=node.name,
+        country=node.country,
+        region=node.region,
+        city=node.city,
+        provider=node.provider,
+        asn=node.asn,
+        latitude=node.latitude,
+        longitude=node.longitude,
+        location_verified=node.location_verified,
+        tier=node.tier,
+    )
+
+
 def task_state(task: MeasurementTask) -> schemas.TaskStateOut:
     return schemas.TaskStateOut(
         id=task.id,
@@ -118,6 +135,32 @@ def task_state(task: MeasurementTask) -> schemas.TaskStateOut:
         tested_ip=task.tested_ip,
         resolved_ips=list(task.resolved_ips or []),
         summary=schemas.Summary.model_validate(task.summary) if task.summary else None,
+    )
+
+
+def _new_task(measurement: Measurement, node: Node) -> MeasurementTask:
+    return MeasurementTask(
+        id=new_id(),
+        measurement_id=measurement.id,
+        node_id=node.id,
+        attempt_id=new_id(),
+        status="pending",
+        resolved_ips=[],
+        node_info=_node_info(node).model_dump(),
+        tested_ip=measurement.target_ip,
+    )
+
+
+def _stage(session: AsyncSession, measurement: Measurement, tasks: list[MeasurementTask]) -> None:
+    """Add a new measurement, its tasks and the event that announces them; the caller commits."""
+    session.add(measurement)
+    session.add_all(tasks)
+    measurement.event_seq = 1
+    first = {"tasks": [task_state(t).model_dump(mode="json") for t in tasks]}
+    session.add(
+        MeasurementEvent(
+            measurement_id=measurement.id, seq=1, type="measurement.created", data=first
+        )
     )
 
 
@@ -218,6 +261,19 @@ class MeasurementEngine:
                 )
             await self._check_rate_and_concurrency(session, settings, owner, source_ip)
 
+            if request.resolve_node_id is not None:
+                if request.kind == "dns":
+                    raise MeasurementError(
+                        "invalid_option",
+                        "A dns check is asked of every node; one node cannot resolve the name for it.",
+                    )
+                if request.dns_mode != "fixed":
+                    raise MeasurementError(
+                        "invalid_option",
+                        "resolve_node_id goes with dns_mode fixed: when each node resolves the "
+                        "name itself, no node resolves it for the others.",
+                    )
+            resolved_by: Node | None = None
             try:
                 parsed = parse_target(request.target)
                 family = request.family
@@ -236,8 +292,16 @@ class MeasurementEngine:
                         )
                     resolved = ResolvedTarget(parsed)
                 else:
+                    resolver = self._resolver
+                    if request.resolve_node_id is not None and parsed.ip is None:
+                        # The address a node gets is checked like any other: the policy below is applied
+                        # to what it found, and a name it reports as private is refused.
+                        resolved_by = await self._node_to_resolve(
+                            session, request.resolve_node_id, settings
+                        )
+                        resolver = self._node_resolver(session, resolved_by, family)
                     resolved = await resolve_target(
-                        parsed, family=family, denylist=denylist, resolver=self._resolver
+                        parsed, family=family, denylist=denylist, resolver=resolver
                     )
             except TargetError as exc:
                 raise MeasurementError(exc.code, exc.message, 422) from exc
@@ -282,6 +346,7 @@ class MeasurementEngine:
                 else None,
                 resolved_ips=resolved.resolved_ips,
                 dns_mode=dns_mode,
+                resolved_by=_node_info(resolved_by).model_dump() if resolved_by else None,
                 family=family,
                 options=plan.options,
                 owner_session_id=owner.session_id,
@@ -292,42 +357,8 @@ class MeasurementEngine:
                 created_at=now,
                 deadline_at=now + timedelta(seconds=plan.deadline_s),
             )
-            session.add(measurement)
-            tasks = [
-                MeasurementTask(
-                    id=new_id(),
-                    measurement_id=measurement.id,
-                    node_id=node.id,
-                    attempt_id=new_id(),
-                    status="pending",
-                    resolved_ips=[],
-                    node_info=schemas.NodeInfo(
-                        id=node.id,
-                        name=node.name,
-                        country=node.country,
-                        region=node.region,
-                        city=node.city,
-                        provider=node.provider,
-                        asn=node.asn,
-                        latitude=node.latitude,
-                        longitude=node.longitude,
-                        location_verified=node.location_verified,
-                        tier=node.tier,
-                    ).model_dump(),
-                    tested_ip=measurement.target_ip,
-                )
-                for node in nodes
-            ]
-            session.add_all(tasks)
-            measurement.event_seq = 1
-            first = {
-                "tasks": [task_state(t).model_dump(mode="json") for t in tasks],
-            }
-            session.add(
-                MeasurementEvent(
-                    measurement_id=measurement.id, seq=1, type="measurement.created", data=first
-                )
-            )
+            tasks = [_new_task(measurement, node) for node in nodes]
+            _stage(session, measurement, tasks)
             await session.commit()
             measurement_id = measurement.id
 
@@ -340,6 +371,141 @@ class MeasurementEngine:
         self.cluster.hub.wake(f"events:{measurement_id}")
         self.cluster.signal_tasks()
         return measurement_id
+
+    # ----------------------------------------------------------------------------------------
+    # One node resolving the name for everyone
+    # ----------------------------------------------------------------------------------------
+
+    async def _node_to_resolve(
+        self, session: AsyncSession, node_id: str, settings: RuntimeSettings
+    ) -> Node:
+        """The node chosen to resolve a name: approved, online and able to ask a DNS question."""
+        node = await session.get(Node, node_id)
+        present = (await self.cluster.online_nodes(session)).get(node_id)
+        if (
+            node is None
+            or node.status != "approved"
+            or present is None
+            or "dns" not in present.capabilities.kinds
+        ):
+            raise MeasurementError(
+                "node_unavailable",
+                f"The node chosen to resolve the name ({node_id}) is offline or cannot ask DNS "
+                "questions. Choose another, or let each node resolve it.",
+                409,
+            )
+        await self._without_busy_volunteers(session, [node], settings, explicit=True)
+        return node
+
+    def _node_resolver(self, session: AsyncSession, node: Node, family: str) -> Resolver:
+        """A resolver that asks `node`, for `resolve_target` to use in place of the backend's own.
+
+        It asks the node's own resolvers (what that node's network gets) for A records, and for AAAA when
+        IPv6 is wanted: AAAA only for family 6, and for "auto" only when there is no A record, as IPv4 comes
+        first there. What it returns goes through the same policy as an address the backend resolved.
+        """
+        record_types = {"4": ("A",), "6": ("AAAA",), "auto": ("A", "AAAA")}[family]
+
+        async def resolve(host: str) -> list[str]:
+            for record_type in record_types:
+                detail = await self._ask_node(session, node, host, record_type)
+                if detail.redacted:
+                    raise TargetError(
+                        "blocked_by_policy",
+                        f"{host} resolves to a private address on {node.name}, so it cannot be measured.",
+                    )
+                if detail.rcode != "NOERROR":
+                    raise TargetError(
+                        "dns_failure", f"{node.name} could not resolve {host} ({detail.rcode})."
+                    )
+                found = [a.data for a in detail.answers if a.type == record_type]
+                if found:
+                    return found
+            return []
+
+        return resolve
+
+    async def _ask_node(
+        self, session: AsyncSession, node: Node, host: str, record_type: str
+    ) -> proto.DnsDetail:
+        """Have `node` ask its own resolvers for `record_type` of `host`, and wait for the answer.
+
+        It goes through the same path as a dns check (a task persisted before it is sent, whichever
+        backend instance holds the node's connection), as a measurement nobody sees: it is removed once
+        answered, because it was never a result a person asked for. `session` is committed first, so
+        the wait holds no database transaction open.
+        """
+        plan = plan_lookup(record_type)
+        now = utcnow()
+        asked = Measurement(
+            id=new_measurement_id(),
+            kind="dns",
+            input_kind="hostname",
+            target_host=host,
+            resolved_ips=[],
+            dns_mode="regional",
+            family="auto",
+            options=plan.options,
+            created_at=now,
+            deadline_at=now + timedelta(seconds=plan.deadline_s),
+        )
+        _stage(session, asked, [_new_task(asked, node)])
+        await session.commit()
+        asked_id = asked.id
+        self.cluster.hub.wake(f"events:{asked_id}")
+        self.cluster.signal_tasks()
+        try:
+            return await self._answer_of(asked_id, node, host)
+        finally:
+            await self._forget(asked_id)
+
+    async def _answer_of(self, measurement_id: str, node: Node, host: str) -> proto.DnsDetail:
+        waiter = self.cluster.hub.waiter(f"events:{measurement_id}")
+        patience = timedelta(seconds=plan_lookup("A").deadline_s)
+        give_up = utcnow() + patience
+        try:
+            while True:
+                async with self._sessionmaker() as db:
+                    status = await db.scalar(
+                        select(Measurement.status).where(Measurement.id == measurement_id)
+                    )
+                    if status != "running":
+                        row = (
+                            await db.execute(
+                                select(Sample.detail)
+                                .join(MeasurementTask, MeasurementTask.id == Sample.task_id)
+                                .where(MeasurementTask.measurement_id == measurement_id)
+                            )
+                        ).first()
+                        detail = proto.parse_detail("dns", row[0] if row else None)
+                        if isinstance(detail, proto.DnsDetail):
+                            return detail
+                        raise TargetError(
+                            "dns_failure", f"{node.name} did not answer the question about {host}."
+                        )
+                if utcnow() >= give_up:
+                    await self.cancel(measurement_id)
+                    continue  # settled as cancelled: the next round reports it
+                await waiter.wait(0.5)
+        finally:
+            self.cluster.hub.release(waiter)
+
+    async def _forget(self, measurement_id: str) -> None:
+        """Remove a lookup that was only a means (see `_ask_node`) and everything it wrote."""
+        async with self._sessionmaker() as db:
+            task_ids = select(MeasurementTask.id).where(
+                MeasurementTask.measurement_id == measurement_id
+            )
+            await db.execute(delete(Sample).where(Sample.task_id.in_(task_ids)))
+            await db.execute(
+                delete(MeasurementEvent).where(MeasurementEvent.measurement_id == measurement_id)
+            )
+            await db.execute(
+                delete(MeasurementTask).where(MeasurementTask.measurement_id == measurement_id)
+            )
+            await db.execute(delete(Measurement).where(Measurement.id == measurement_id))
+            await db.commit()
+        self._locks.pop(measurement_id, None)
 
     async def _check_rate_and_concurrency(
         self,
@@ -1150,6 +1316,9 @@ class MeasurementEngine:
                 input_kind=measurement.input_kind,
             ),
             dns_mode=measurement.dns_mode,
+            resolved_by=schemas.NodeInfo.model_validate(measurement.resolved_by)
+            if measurement.resolved_by
+            else None,
             family=measurement.family,
             options=schemas.MeasurementOptions.model_validate(measurement.options),
             shared=measurement.shared,

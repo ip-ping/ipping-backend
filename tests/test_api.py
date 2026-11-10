@@ -219,7 +219,8 @@ def test_full_measurement_through_a_node(api: Api) -> None:
     ws, session = connect(api, credential)
     try:
         created = api.post(
-            "/api/v1/measurements", {"target": "https://user:pw@example.com/a/b?secret=1"}
+            "/api/v1/measurements",
+            {"target": "https://user:pw@example.com/a/b?secret=1", "dns_mode": "fixed"},
         )
         assert created.status_code == 201, created.text
         measurement = created.json()
@@ -533,7 +534,9 @@ def test_fixed_mode_rejects_a_node_that_probed_a_different_address(api: Api) -> 
     _, credential = api.enroll_node()
     ws, session = connect(api, credential)
     try:
-        measurement = api.post("/api/v1/measurements", {"target": "example.com"}).json()
+        measurement = api.post(
+            "/api/v1/measurements", {"target": "example.com", "dns_mode": "fixed"}
+        ).json()
         task = json.loads(session.receive_text())
         session.send_text(
             json.dumps(
@@ -558,7 +561,9 @@ def test_duplicate_and_forged_frames_are_ignored(api: Api) -> None:
     _, credential = api.enroll_node()
     ws, session = connect(api, credential)
     try:
-        measurement = api.post("/api/v1/measurements", {"target": "example.com"}).json()
+        measurement = api.post(
+            "/api/v1/measurements", {"target": "example.com", "dns_mode": "fixed"}
+        ).json()
         task = json.loads(session.receive_text())
         ids = {"task_id": task["task_id"], "attempt_id": task["attempt_id"]}
         sample = json.dumps({"type": "sample", **ids, "seq": 0, "status": "ok", "rtt_us": 7000})

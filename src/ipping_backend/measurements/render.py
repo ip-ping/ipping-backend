@@ -126,7 +126,14 @@ def render_text(m: MeasurementOut) -> str:
     elif m.kind in ("ping", "tcp"):
         unit = "echo requests" if m.kind == "ping" else "connections"
         extra = f", {m.options.count} {unit} per node"
-    lines = [f"{LABELS.get(m.kind, m.kind)} {m.target.host}{port} ({when}{extra})", ""]
+    lines = [f"{LABELS.get(m.kind, m.kind)} {m.target.host}{port} ({when}{extra})"]
+    if m.resolved_by is not None and m.target.ip:
+        # every node measured the address this one node found for the name
+        lines.append(
+            f"{m.target.host} resolved to {m.target.ip} by {m.resolved_by.name}, "
+            f"{m.resolved_by.country or '?'}"
+        )
+    lines.append("")
     names = [f"{t.node.name}, {t.node.country or '?'}" for t in m.tasks]
     width = max([10, *(len(n) for n in names)])
     for task, name in zip(m.tasks, names, strict=True):

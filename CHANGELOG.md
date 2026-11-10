@@ -2,6 +2,38 @@
 
 Progress log for `ipping-backend`, newest first. Each entry is one small, tested step.
 
+## v0.9.0 (2026-11-10)
+
+Who resolves a hostname changes: **each node resolves it itself by default**, and a measurement can ask **one chosen node**
+to resolve it for everybody. The database migrates to `0012` (`measurements.resolved_by`).
+
+### What changed
+- `dns_mode` defaults to `regional` (it was `fixed`): every node is sent the name and probes the address that is near it. Anyone
+  who relied on the old default sends `"dns_mode": "fixed"`. An IP address is still the same for every node, and a watch made
+  from now on defaults to `regional` too (watches that exist keep the mode they were saved with).
+- New `resolve_node_id` (with `dns_mode` `fixed`, a hostname target): that node asks its own resolvers for the name, and every node
+  measures the address it found. The question is the DNS check the nodes already run (`system` resolver, A; AAAA when IPv6 is
+  asked for, or when there is no A record), staged as a measurement that nobody sees and removed once it is answered, so nodes
+  need no new version and the backend instances share nothing new. `fixed` without a node still means the backend resolves it.
+- What the node found goes through the same policy as an address the backend resolved: private addresses and the blocklist are
+  refused (a resolver answer the node left out as private, which it only counts, refuses the measurement), a name the node cannot
+  resolve is `dns_failure` with the node's name, a node that does not answer in about ten seconds likewise, and a node that is
+  offline, waiting for approval or without DNS checks is `node_unavailable`. A volunteer's node can be chosen (like `node_ids`)
+  and counts against its per-minute limit.
+- `resolve_node_id` with `dns_mode` `regional`, or on a `dns` check, is `invalid_option`; on an IP address it is ignored.
+- The measurement says who resolved it: `resolved_by` (the node as it was at the time), in `GET /measurements/{id}` and as a
+  line in the text output. `GET /api/v1/text` takes `dns_mode` and `resolve_node_id` too (its default is `regional` as well).
+- The **location estimate** works for names the nodes resolved themselves: nodes are grouped by the address they measured, the
+  estimate is for the address most of them measured, `groups` lists the rest with their node counts, and `?ip=` estimates another
+  one. Before, such a measurement had no estimate.
+
+### Tests
+- `tests/test_resolve_node.py` (16): the default, the chosen node asked its own resolvers about the name as typed, every node
+  measures what it found, a node that is not among the measuring ones, IPv6 and the IPv4-first fallback, private and blocklisted
+  answers, NXDOMAIN and SERVFAIL, no records, a node that never answers (cancelled, and nothing left in the database), offline or
+  not able, awaiting approval, combinations that make no sense, the text endpoint. The tests that relied on the old default now say
+  `fixed`. 452 pass on SQLite and 464 on PostgreSQL, with ruff and mypy clean.
+
 ## v0.8.1 (2026-11-10)
 
 Fix to the node auto-fill of v0.8.0, found when the released files were tried on a fresh machine: a node that reported
