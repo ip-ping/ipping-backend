@@ -4,6 +4,11 @@ Progress log for `ipping-backend`, newest first. Each entry is one small, tested
 
 ## v0.9.0 (2026-11-10)
 
+Released and verified: the files match `SHA256SUMS` and carry attestations (`gh attestation verify`), a PostgreSQL database that
+the released v0.8.1 image had migrated (with a measurement in it) upgrades to `0012` with the released v0.9.0 image and keeps the
+row, and the released image with the simulated fleet measured `example.org` at two addresses by default (estimate grouped 12 / 4),
+and at one address, Tokyo's, when Tokyo was asked to resolve it, with the combination that makes no sense refused.
+
 Who resolves a hostname changes: **each node resolves it itself by default**, and a measurement can ask **one chosen node**
 to resolve it for everybody. The database migrates to `0012` (`measurements.resolved_by`).
 
