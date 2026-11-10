@@ -43,6 +43,21 @@ class EvidenceOut(BaseModel):
     )
 
 
+class AccuracyOut(BaseModel):
+    """How often answers like this one were right on real targets of known position (RIPE Atlas anchors)."""
+
+    percent: int = Field(
+        description="The share of such answers within `radius_km` of the truth (1 to 99, never certainty)"
+    )
+    radius_km: int
+    by_radius: dict[str, int] = Field(
+        description="The same share for 100, 300, 500, 1000 and 2000 km (keys are the radii)"
+    )
+    basis: str = Field(
+        description="What the figure is a rate of, in words: it is not a probability for this address"
+    )
+
+
 class RuledOutOut(BaseModel):
     node_id: str
     node_name: str
@@ -104,6 +119,20 @@ class LocationEstimateOut(BaseModel):
     limitations: list[str] = []
     geoip: GeoIpOut | None = Field(
         default=None, description="A configured GeoIP database's answer, checked against the nodes"
+    )
+    accuracy: AccuracyOut | None = Field(
+        default=None,
+        description=(
+            "How accurate answers like this are, measured on real targets: the share within each radius. "
+            "Given whenever there is a likely place."
+        ),
+    )
+    conflicting: bool = Field(
+        default=False,
+        description=(
+            "The nodes disagree about where the address is (anycast, a rerouted path, a bad measurement); the "
+            "estimate is made from the nearest node and the nodes that agree with it"
+        ),
     )
     groups: list[AddressGroupOut] = Field(
         default=[],

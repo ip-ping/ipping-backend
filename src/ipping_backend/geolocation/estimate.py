@@ -9,16 +9,22 @@ both, in that order:
 1. **Constraints.** A node that measured a round trip of `r` ms heard from the target within
    `150 * r` km, because even at the speed of light in vacuum 1 ms of round trip covers at most 150 km
    of distance. Candidate places outside any node's limit are impossible and are dropped. If two
-   nodes' limits cannot overlap, no single place fits at all, and the answer is "inconclusive", not a
-   guess: that is what anycast, a rerouted path or a bad measurement looks like.
+   nodes' limits cannot overlap, no single place fits all of them: that is what anycast, a rerouted
+   path or a bad measurement looks like. The nodes are then said to disagree (`conflicting`) and the
+   estimate is made from the nearest node and the nodes that agree with it.
 2. **Ranking.** Among the places that remain, each is scored by how well the measured times match an
    internet path (a path is usually 1.2 to 3 times the fibre distance, plus about a millisecond; the
    factor that fits a place best is used, with a pull towards the typical 1.7), nearest nodes weighted
    most. Anything faster than light in fibre is penalised hard.
-3. **Honesty.** The result carries the evidence it was built from, a strength label, the other
-   plausible places, and warnings. The label is a rule of thumb, never a percentage or a radius for
-   *this* answer; what each label has meant in practice is measured against real targets (below).
-   "Insufficient evidence" is a normal outcome, and so is "inconclusive".
+3. **Always an answer, with its odds.** Whenever one node with a known position measured the address
+   there is an estimate, however thin the evidence; only a measurement with no such node has none.
+   Nodes that cannot all be right (anycast, a rerouted path, a bad measurement) are not a reason to
+   refuse: the estimate is made from the nearest node and the nodes that agree with it, and the
+   result says that the nodes disagree. The result carries the evidence, a strength label, the other
+   plausible places, warnings and an **accuracy**: how often, on real targets of known position, an
+   answer from a closest node this far away was within 100, 300, 500, 1,000 and 2,000 km
+   (`accuracy.py`; the table is fitted on the calibration half and checked on the test half). It is
+   a measured rate for answers like this one, not a probability for this particular address.
 
 Calibration
 -----------
@@ -37,9 +43,10 @@ import math
 from dataclasses import dataclass, field
 from typing import Literal
 
+from .accuracy import Accuracy, accuracy_for
 from .gazetteer import City, cities
 
-MODEL_VERSION = "multilateration-4"
+MODEL_VERSION = "multilateration-5"
 
 KM_PER_RTT_MS_HARD = (
     150.0  # c in vacuum: 299.8 km per ms one way = 150 km of distance per round-trip ms
@@ -59,8 +66,10 @@ BASE_MS = 8.0  # fixed delay on a real path (last mile, switching, queues); fitt
 TOLERANCE_KM = 60.0  # node coordinates are usually city-level; do not reject on that alone
 
 MAX_EVIDENCE_NODES = 12
-MIN_NODES = 3
-MAX_CLOSEST_RTT_MS = 40.0  # beyond this the answer is usually more than 1000 km off
+ENOUGH_NODES = 3  # fewer is still answered, with a warning
+FAR_CLOSEST_RTT_MS = (
+    40.0  # beyond this the answer is usually more than 1000 km off: said, not withheld
+)
 NEAR_EQUAL = 3.0  # score difference within which places count as fitting "about as well"
 STRONG_SPREAD_KM = 500.0
 MODERATE_SPREAD_KM = 1500.0
@@ -75,8 +84,9 @@ LIMITATIONS = (
     "This estimates where the address's network appears to be. It does not locate a person or a business.",
 )
 NO_SINGLE_LOCATION = (
-    "A single location could not be established. Possible explanations include anycast, routing "
-    "differences, or unreliable observations."
+    "The nodes disagree about where this address is, so no single place fits all of them. Possible "
+    "explanations include anycast, routing differences, or unreliable observations. The estimate "
+    "is made from the nearest node and the nodes that agree with it."
 )
 
 
@@ -113,6 +123,8 @@ class Closest:
 
 @dataclass(slots=True)
 class Estimate:
+    # "estimated" whenever a node with a known position measured the address; "insufficient_evidence" only when none did.
+    # ("inconclusive" is no longer given: nodes that disagree set `conflicting` and the estimate is made from those that agree.)
     status: Literal["estimated", "inconclusive", "insufficient_evidence"]
     summary: str
     likely: Place | None = None
@@ -123,6 +135,8 @@ class Estimate:
     nodes_total: int = 0
     warnings: list[str] = field(default_factory=list)
     limitations: tuple[str, ...] = LIMITATIONS
+    conflicting: bool = False
+    accuracy: Accuracy | None = None
 
 
 def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -153,6 +167,35 @@ def _place(city: City) -> Place:
     return Place(city.name, city.country, city.latitude, city.longitude)
 
 
+def _agreeing(evidence: list[Observation]) -> tuple[list[Observation], str | None]:
+    """The nearest node and, in order of round trip, every node that does not contradict one already taken.
+
+    Two nodes contradict each other when they are further apart than any real path allows given how close
+    both say the target is. The second value says so for the first pair found (None: nobody disagreed).
+    """
+    taken: list[Observation] = []
+    first_clash: str | None = None
+    for obs in evidence:
+        clash = next(
+            (
+                (o, apart)
+                for o in taken
+                if (apart := haversine_km(o.latitude, o.longitude, obs.latitude, obs.longitude))
+                > CONSISTENCY_KM_PER_RTT_MS * (o.rtt_ms + obs.rtt_ms) + 2 * TOLERANCE_KM
+            ),
+            None,
+        )
+        if clash is None:
+            taken.append(obs)
+        elif first_clash is None:
+            o, apart = clash
+            first_clash = (
+                f"{o.name} ({o.rtt_ms:.1f} ms) and {obs.name} ({obs.rtt_ms:.1f} ms) are {apart:.0f} km "
+                "apart: no single place can be that close to both."
+            )
+    return taken, first_clash
+
+
 def estimate(
     observations: list[Observation], gazetteer: tuple[City, ...] | None = None
 ) -> Estimate:
@@ -162,10 +205,10 @@ def estimate(
     evidence = usable[:MAX_EVIDENCE_NODES]
     result.evidence = list(evidence)
 
-    if len(evidence) < MIN_NODES:
+    if not evidence:
         result.summary = (
-            f"Not enough evidence: {len(evidence)} node(s) with a known position measured this "
-            f"address, and at least {MIN_NODES} are needed."
+            "No estimate: no node with a known position measured this address. Give the nodes a "
+            "position (the admin page) and measure again."
         )
         return result
 
@@ -173,25 +216,12 @@ def estimate(
     result.closest = Closest(
         nearest, nearest.rtt_ms * KM_PER_RTT_MS_HARD, nearest.rtt_ms * KM_PER_RTT_MS_FIBRE
     )
-    if nearest.rtt_ms > MAX_CLOSEST_RTT_MS:
-        result.summary = (
-            f"Not enough evidence: the closest node still measured {nearest.rtt_ms:.0f} ms, which "
-            "leaves most of the world possible."
-        )
-        return result
-
-    # Two nodes that cannot both be right about one place.
-    for i, a in enumerate(evidence):
-        for b in evidence[i + 1 :]:
-            apart = haversine_km(a.latitude, a.longitude, b.latitude, b.longitude)
-            if apart > CONSISTENCY_KM_PER_RTT_MS * (a.rtt_ms + b.rtt_ms) + 2 * TOLERANCE_KM:
-                result.status = "inconclusive"
-                result.summary = NO_SINGLE_LOCATION
-                result.warnings.append(
-                    f"{a.name} ({a.rtt_ms:.1f} ms) and {b.name} ({b.rtt_ms:.1f} ms) are {apart:.0f} km "
-                    "apart: no single place can be that close to both."
-                )
-                return result
+    # Nodes that cannot all be right: go on with the ones that agree with the nearest, and say so.
+    evidence, clash = _agreeing(evidence)
+    if clash is not None:
+        result.conflicting = True
+        result.warnings.append(NO_SINGLE_LOCATION)
+        result.warnings.append(clash)
 
     feasible: list[tuple[City, list[float]]] = []
     for city in gazetteer:
@@ -205,7 +235,7 @@ def estimate(
             feasible.append((city, distances))
 
     weights = [_weight(o) for o in evidence]
-    scored: list[tuple[float, City]] = []
+    scored: list[tuple[float, float, City]] = []
     for city, distances in feasible:
         best_fit = min(
             sum(
@@ -215,19 +245,28 @@ def estimate(
             + INFLATION_PRIOR * math.log(k / INFLATION) ** 2
             for k in INFLATIONS
         )
-        scored.append((best_fit, city))
+        # a tie (a ring of equally good places around one node) goes to the one nearest the nearest node
+        scored.append((best_fit, distances[0], city))
     if not scored:
-        result.status = "inconclusive"
-        result.summary = NO_SINGLE_LOCATION
-        result.warnings.append("No known city is within every node's speed-of-light limit.")
-        return result
+        # no city is within every limit (a node's neighbourhood has no city of 100,000): the nearest node's nearest city
+        near_city = min(
+            gazetteer,
+            key=lambda c: haversine_km(
+                nearest.latitude, nearest.longitude, c.latitude, c.longitude
+            ),
+        )
+        scored = [(0.0, 0.0, near_city)]
+        result.warnings.append(
+            "No known city is within every node's speed-of-light limit; the city nearest the closest node is used."
+        )
 
-    scored.sort(key=lambda s: s[0])
-    best_score, best = scored[0]
+    scored.sort(key=lambda s: (s[0], s[1]))
+    best_score, _, best = scored[0]
     likely = _place(best)
+    scored2 = [(score, city) for score, _, city in scored]
 
     picked: list[tuple[float, City]] = [(best_score, best)]
-    for score, city in scored[1:]:
+    for score, city in scored2[1:]:
         if len(picked) > MAX_ALTERNATIVES:
             break
         if (
@@ -251,7 +290,7 @@ def estimate(
     spread_km = max(
         (
             haversine_km(best.latitude, best.longitude, c.latitude, c.longitude)
-            for sc, c in scored
+            for sc, c in scored2
             if sc <= best_score + NEAR_EQUAL
         ),
         default=0.0,
@@ -263,7 +302,9 @@ def estimate(
         for b in evidence
     )
     strength: Strength = "low"
-    if (
+    if result.conflicting:
+        pass  # nodes that disagree are never strong evidence of one place
+    elif (
         len(evidence) >= 4
         and nearest.rtt_ms <= 15
         and far_apart >= 1000
@@ -274,7 +315,17 @@ def estimate(
     elif nearest.rtt_ms <= 10 and spread_km <= MODERATE_SPREAD_KM and margin >= 2:
         strength = "moderate"
 
-    if nearest.rtt_ms > 20:
+    if len(evidence) < ENOUGH_NODES:
+        result.warnings.append(
+            f"Only {len(evidence)} node(s) with a known position {'agree' if result.conflicting else 'measured this address'}; "
+            f"{ENOUGH_NODES} or more narrow it down."
+        )
+    if nearest.rtt_ms > FAR_CLOSEST_RTT_MS:
+        result.warnings.append(
+            f"The closest node still measured {nearest.rtt_ms:.0f} ms, which leaves most of the world possible: "
+            "treat this as a guess."
+        )
+    elif nearest.rtt_ms > 20:
         result.warnings.append(
             f"The closest node measured {nearest.rtt_ms:.0f} ms, so the area is broad."
         )
@@ -292,6 +343,7 @@ def estimate(
     result.status = "estimated"
     result.likely = likely
     result.strength = strength
+    result.accuracy = accuracy_for(nearest.rtt_ms)
     result.alternatives = alternatives
     result.summary = (
         f"Likely near {likely.name}, {likely.country}: the closest node, {nearest.name}, measured "

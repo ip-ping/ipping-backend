@@ -105,7 +105,7 @@ def test_verified_coordinates_are_recorded_with_the_measurement(api: Api) -> Non
         close(nodes)
 
 
-def test_two_nodes_are_not_enough(api: Api) -> None:
+def test_two_nodes_still_get_an_estimate_with_its_accuracy(api: Api) -> None:
     nodes = fleet(api, SITES[:2])
     try:
         mid = api.post(
@@ -114,8 +114,14 @@ def test_two_nodes_are_not_enough(api: Api) -> None:
         for _, session, rtt in nodes:
             answer(session, rtt)
         result = api.get(f"/api/v1/measurements/{mid}/location").json()
-        assert result["status"] == "insufficient_evidence" and result["likely"] is None
-        assert "at least 3" in result["summary"]
+        assert result["status"] == "estimated" and result["likely"] is not None
+        assert any("Only 2 node" in w for w in result["warnings"])
+        # the figure is a measured rate for answers like this one, with its radius and what it is a rate of
+        accuracy = result["accuracy"]
+        assert accuracy["radius_km"] == 500 and 1 <= accuracy["percent"] <= 99
+        assert set(accuracy["by_radius"]) == {"100", "300", "500", "1000", "2000"}
+        assert "not a probability for this address" in accuracy["basis"]
+        assert result["conflicting"] is False
     finally:
         close(nodes)
 
@@ -153,8 +159,10 @@ def test_contradictory_nodes_give_no_single_place(api: Api) -> None:
         for _, session, rtt in nodes:
             answer(session, rtt)
         result = api.get(f"/api/v1/measurements/{mid}/location").json()
-        assert result["status"] == "inconclusive" and result["likely"] is None
-        assert "Possible explanations include anycast" in result["summary"]
+        assert result["status"] == "estimated" and result["likely"] is not None
+        assert result["conflicting"] is True and result["strength"] == "low"
+        assert any("Possible explanations include anycast" in w for w in result["warnings"])
+        assert "disagree" in result["accuracy"]["basis"]
     finally:
         close(nodes)
 
@@ -227,11 +235,11 @@ def test_nodes_that_resolved_different_addresses_are_estimated_by_address(api: A
         # the same document the second time
         assert api.get(f"/api/v1/measurements/{mid}/location").json() == located
 
-        # the other address, by request: two nodes are not enough for an estimate, and it is not stored over the first
+        # the other address, by request: two nodes make a thinner estimate, and it is not stored over the first
         other = api.get(
             f"/api/v1/measurements/{mid}/location", params={"ip": "151.101.1.77"}
         ).json()
-        assert other["target_ip"] == "151.101.1.77" and other["status"] == "insufficient_evidence"
+        assert other["target_ip"] == "151.101.1.77" and other["status"] == "estimated"
         assert [g["selected"] for g in other["groups"]] == [False, True]
         assert sorted(e["node_name"] for e in other["evidence"]) == ["Madrid", "New York"]
         assert api.get(f"/api/v1/measurements/{mid}/location").json() == located

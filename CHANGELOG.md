@@ -2,6 +2,40 @@
 
 Progress log for `ipping-backend`, newest first. Each entry is one small, tested step.
 
+## v0.10.0 (2026-11-10, not released yet)
+
+The location estimate is **not strict any more**: it always gives an estimate, with a percentage for how accurate answers like it
+have been. No database change (still `0012`); the model is now `multilateration-5`, so stored estimates are worked out again.
+
+### What changed
+- **An answer whenever a node with a position took part.** It used to decline with fewer than 3 such nodes, with a closest node
+  over 40 ms away, and when nodes contradicted each other (36% of the random fleets of the calibration got no answer). Now those are
+  warnings: "Only 2 node(s)...", "The closest node still measured 90 ms, which leaves most of the world possible: treat this as a
+  guess", and, for nodes that disagree, the old explanation (anycast, routing, bad data). The only answer without a place is a
+  measurement that no node with a position took part in (`insufficient_evidence`, with the reason). `inconclusive` is no longer
+  given; the field stays in the contract.
+- **Nodes that disagree** (`conflicting: true`): the estimate is made from the nearest node and, in order of round trip, every node
+  that does not contradict one already taken, instead of refusing. It is never `strong`. Real unicast fleets never trigger it;
+  99% to 100% of the anycast fleets with 16 or more nodes do.
+- **A tie goes to the city nearest the nearest node** (a ring of equally good places around one node used to be settled by the order
+  of the list), and a node with no city of 100,000 inside its limit falls back to the city nearest it.
+- **`accuracy`** on every estimate with a place: `percent` (1 to 99, never certainty) is the share of answers, on real targets of
+  known position, that were within `radius_km` (500) when the closest node was about this far away, `by_radius` the same for 100,
+  300, 500, 1,000 and 2,000 km, and `basis` says in words that it is a rate for answers like this one and not a probability for
+  this address (and that, for disagreeing nodes, the real figure is lower). `geolocation/accuracy.py` holds the table; it is
+  generated: `uv run python scripts/evaluate_location.py --fit-accuracy` fits it on the calibration half of the RIPE Atlas data,
+  never lets it rise as the closest node gets further, and reports how it does on the test half (Brier 0.096; stated and true
+  share within 7 points overall). Re-fit it whenever the model changes.
+- `scripts/evaluate_location.py` runs fleets of 1, 2, 4, 8, 16 and 32 and reports `conflicting` for the anycast check; results for
+  the new model are in `calibration/` (`result-test-multilateration-5.txt`, `result-anycast-multilateration-5.txt`,
+  `accuracy-fit-multilateration-5.txt`). The README section "Estimated network location" is rewritten around them.
+
+### Tests
+- Estimator tests for what used to be refusals (1 and 2 nodes, a node 140 ms away, nodes 3,600 km apart), for the figure's shape
+  (never rising with the closest node's round trip, 1 to 99, headline equals the 500 km figure), and on the real data: no unicast
+  fleet is flagged, every measurement gets an answer and a far one is `low`, the stated accuracy matches the held-out half, and 95%
+  or more of the anycast fleets are flagged. API tests for `accuracy` and `conflicting`. 456 pass, ruff and mypy clean.
+
 ## v0.9.0 (2026-11-10)
 
 Released and verified: the files match `SHA256SUMS` and carry attestations (`gh attestation verify`), a PostgreSQL database that

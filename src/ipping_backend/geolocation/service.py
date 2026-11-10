@@ -15,6 +15,7 @@ from .estimate import haversine_km
 from .geofeed import Entry, Geofeeds, host_of
 from .geoip import GeoIp, GeoPlace, rule_out, valid_ip
 from .schemas import (
+    AccuracyOut,
     AddressGroupOut,
     AlternativeOut,
     AsnOut,
@@ -143,9 +144,32 @@ def _to_out(
             for o in sorted(observations, key=lambda o: o.rtt_ms)
         ],
         nodes_total=estimate.nodes_total,
+        conflicting=estimate.conflicting,
+        accuracy=_accuracy_out(estimate),
         warnings=_address_warning(target_ip, groups) + list(estimate.warnings),
         limitations=list(estimate.limitations),
         groups=_group_outs(target_ip, groups),
+    )
+
+
+def _accuracy_out(estimate: E.Estimate) -> AccuracyOut | None:
+    if estimate.accuracy is None:
+        return None
+    return AccuracyOut(
+        percent=estimate.accuracy.headline_pct,
+        radius_km=estimate.accuracy.headline_km,
+        by_radius={str(km): pct for km, pct in estimate.accuracy.by_radius.items()},
+        basis=(
+            f"Of answers made when the closest node was about this far away, on real targets of known position, "
+            f"this share was within {estimate.accuracy.headline_km:,} km. It is a rate for answers like this one, "
+            "not a probability for this address."
+            + (
+                " The nodes disagree here, so the address may be served from several places and the real "
+                "figure is lower."
+                if estimate.conflicting
+                else ""
+            )
+        ),
     )
 
 

@@ -1,0 +1,47 @@
+model multilateration-5: anycast root servers, 30 random fleets per size and server
+
+target                 fleet      disagree  no estimate      agree   answered as (strength)
+k.root-servers.net         1             0            0         30   low 17, moderate 13
+k.root-servers.net         2            13            0         17   low 21, moderate 9
+k.root-servers.net         4            28            0          2   low 30
+k.root-servers.net         8            30            0          0   low 30
+k.root-servers.net        16            30            0          0   low 30
+k.root-servers.net        32            30            0          0   low 30
+f.root-servers.net         1             0            0         30   low 6, moderate 24
+f.root-servers.net         2            22            0          8   low 23, moderate 7
+f.root-servers.net         4            28            0          2   low 28, strong 2
+f.root-servers.net         8            30            0          0   low 30
+f.root-servers.net        16            30            0          0   low 30
+f.root-servers.net        32            30            0          0   low 30
+i.root-servers.net         1             0            0         30   low 15, moderate 15
+i.root-servers.net         2            13            0         17   low 15, moderate 15
+i.root-servers.net         4            27            0          3   low 28, moderate 1, strong 1
+i.root-servers.net         8            30            0          0   low 30
+i.root-servers.net        16            30            0          0   low 30
+i.root-servers.net        32            30            0          0   low 30
+m.root-servers.net         1             0            0         30   low 28, moderate 2
+m.root-servers.net         2             8            0         22   low 24, moderate 6
+m.root-servers.net         4            20            0         10   low 27, moderate 3
+m.root-servers.net         8            26            0          4   low 28, strong 2
+m.root-servers.net        16            28            0          2   low 28, moderate 2
+m.root-servers.net        32            29            0          1   low 29, strong 1
+l.root-servers.net         1             0            0         30   low 20, moderate 10
+l.root-servers.net         2             8            0         22   low 23, moderate 7
+l.root-servers.net         4            26            0          4   low 29, moderate 1
+l.root-servers.net         8            28            0          2   low 29, strong 1
+l.root-servers.net        16            30            0          0   low 30
+l.root-servers.net        32            30            0          0   low 30
+e.root-servers.net         1             0            0         30   low 7, moderate 23
+e.root-servers.net         2            26            0          4   low 26, moderate 4
+e.root-servers.net         4            30            0          0   low 30
+e.root-servers.net         8            30            0          0   low 30
+e.root-servers.net        16            30            0          0   low 30
+e.root-servers.net        32            30            0          0   low 30
+j.root-servers.net         1             0            0         30   low 15, moderate 15
+j.root-servers.net         2            15            0         15   low 20, moderate 10
+j.root-servers.net         4            25            0          5   low 27, strong 3
+j.root-servers.net         8            30            0          0   low 30
+j.root-servers.net        16            30            0          0   low 30
+j.root-servers.net        32            30            0          0   low 30
+
+all 1260 runs: disagree 910, estimated 350, strength:low 1083, strength:moderate 167, strength:strong 10

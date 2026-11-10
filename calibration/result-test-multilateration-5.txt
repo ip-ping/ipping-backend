@@ -1,0 +1,61 @@
+model multilateration-5: 5040 estimates, 26 targets, set=test, 69s
+
+== all fleet sizes
+strength                 runs  ≤ 100 km  ≤ 300 km  ≤ 500 km  ≤1000 km    median      p90   floor
+strong                    404       79%      100%      100%      100%      21km    178km     7km
+moderate                  377       17%       80%       99%      100%     205km    339km     8km
+low                      4259        2%       14%       24%       40%    1502km   9374km     7km
+
+== fleets of 1
+strength                 runs  ≤ 100 km  ≤ 300 km  ≤ 500 km  ≤1000 km    median      p90   floor
+moderate                   17       29%       88%      100%      100%     197km    311km    21km
+low                       823        1%        5%        9%       21%    3348km  12444km     7km
+
+== fleets of 2
+strength                 runs  ≤ 100 km  ≤ 300 km  ≤ 500 km  ≤1000 km    median      p90   floor
+moderate                   23       39%       96%      100%      100%     174km    280km     3km
+low                       817        1%        8%       17%       30%    2180km  12108km     7km
+
+== fleets of 4
+strength                 runs  ≤ 100 km  ≤ 300 km  ≤ 500 km  ≤1000 km    median      p90   floor
+strong                     36       81%      100%      100%      100%       7km    190km     7km
+moderate                   31        6%       68%      100%      100%     251km    411km     9km
+low                       773        2%       13%       22%       43%    1320km   8185km     7km
+
+== fleets of 8
+strength                 runs  ≤ 100 km  ≤ 300 km  ≤ 500 km  ≤1000 km    median      p90   floor
+strong                     63       81%      100%      100%      100%      21km    197km     8km
+moderate                   72        8%       67%      100%      100%     252km    349km    21km
+low                       705        3%       19%       29%       45%    1212km   7179km     7km
+
+== fleets of 16
+strength                 runs  ≤ 100 km  ≤ 300 km  ≤ 500 km  ≤1000 km    median      p90   floor
+strong                    113       79%      100%      100%      100%      27km    190km     7km
+moderate                   99       10%       82%       99%      100%     205km    349km     8km
+low                       628        5%       22%       33%       54%     873km   5620km     7km
+
+== fleets of 32
+strength                 runs  ≤ 100 km  ≤ 300 km  ≤ 500 km  ≤1000 km    median      p90   floor
+strong                    192       79%      100%      100%      100%       8km    158km     7km
+moderate                  135       24%       84%       99%      100%     174km    302km     8km
+low                       513        4%       26%       43%       61%     633km   3385km     7km
+
+== by the closest node's round trip (estimated runs)
+nearest                  runs  ≤ 100 km  ≤ 300 km  ≤ 500 km  ≤1000 km    median      p90   floor
+  0-  5 ms                435       80%      100%      100%      100%      21km    161km     7km
+  5- 10 ms                475        8%       71%       98%      100%     245km    405km     8km
+ 10- 20 ms                871        5%       35%       58%       89%     415km   1029km     4km
+ 20- 40 ms                875        2%       14%       24%       51%     990km   2499km     8km
+ 40- 80 ms                617        2%        6%       11%       27%    1942km   4451km     8km
+ 80-  ∞ ms               1767        1%        4%        6%       11%    4671km  14073km     4km
+
+status of all runs: {'estimated': 5040}
+every estimated run: median 1035 km, p90 8789 km; median floor 7 km
+
+largest errors:
+    19741 km  Hong Kong, CN                fleet 16 low       nearest 147.2 ms
+    19658 km  Singapore, SG                fleet  2 low       nearest 158.3 ms
+    19529 km  Hong Kong, CN                fleet  2 low       nearest 147.9 ms
+    19461 km  Jakarta, ID                  fleet  2 low       nearest 152.4 ms
+    19390 km  Hong Kong, CN                fleet  1 low       nearest 200.8 ms
+    19381 km  Hong Kong, CN                fleet  1 low       nearest 189.2 ms

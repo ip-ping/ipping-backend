@@ -135,60 +135,86 @@ def test_a_random_population_of_scenarios_and_what_each_label_promises() -> None
     assert statistics.median(low) < 800
 
 
-def test_two_far_apart_nodes_both_very_close_means_no_single_place() -> None:
+def test_two_far_apart_nodes_both_very_close_still_give_an_estimate_and_say_they_disagree() -> None:
     """The signature of anycast, a rerouted path or a bad measurement, though it proves none of them."""
     nodes = [city("Frankfurt am Main", "DE"), city("Singapore", "SG"), city("Sydney", "AU")]
     observations = [
-        E.Observation(n.name, n.name, n.latitude, n.longitude, 2.0, True) for n in nodes
+        E.Observation(n.name, n.name, n.latitude, n.longitude, 2.0 + i * 0.1, True)
+        for i, n in enumerate(nodes)
     ]
     result = E.estimate(observations)
-    assert result.status == "inconclusive"
-    assert "single location could not be established" in result.summary
-    assert "anycast" in result.summary and result.likely is None
-    assert any("apart" in w for w in result.warnings)
+    # an answer all the same: the nearest node and the nodes that agree with it, with the disagreement said
+    assert result.status == "estimated" and result.likely is not None and result.conflicting
+    assert result.strength == "low" and result.accuracy is not None
+    assert result.likely.name == "Frankfurt am Main"
+    assert any("anycast" in w for w in result.warnings) and any(
+        "apart" in w for w in result.warnings
+    )
 
 
-def test_too_few_nodes_is_insufficient_evidence() -> None:
+def test_too_few_nodes_still_give_an_estimate_with_a_warning() -> None:
     result = E.estimate(observe(city("Paris", "FR"), HUBS[:2], 1.7, random.Random(0)))
-    assert result.status == "insufficient_evidence" and result.likely is None
-    assert "at least 3" in result.summary
-    assert E.estimate([]).status == "insufficient_evidence"
+    assert result.status == "estimated" and result.likely is not None
+    assert any("Only 2 node" in w for w in result.warnings)
+    one = E.estimate(observe(city("Paris", "FR"), HUBS[:1], 1.7, random.Random(0)))
+    assert one.status == "estimated" and one.likely is not None and one.accuracy is not None
+    assert any("Only 1 node" in w for w in one.warnings)
 
 
-def test_when_even_the_closest_node_is_far_away_it_says_so() -> None:
+def test_only_no_node_at_all_means_no_estimate() -> None:
+    result = E.estimate([])
+    assert (
+        result.status == "insufficient_evidence"
+        and result.likely is None
+        and result.accuracy is None
+    )
+    assert (
+        "No node with a known position" in result.summary
+        or "no node with a known position" in result.summary
+    )
+
+
+def test_when_even_the_closest_node_is_far_away_there_is_a_guess_and_it_says_so() -> None:
     nodes = HUBS[:4]
     observations = [
         E.Observation(n.name, n.name, n.latitude, n.longitude, 140.0 + i, True)
         for i, n in enumerate(nodes)
     ]
     result = E.estimate(observations)
-    assert result.status == "insufficient_evidence"
-    assert "leaves most of the world possible" in result.summary
+    assert result.status == "estimated" and result.likely is not None and result.strength == "low"
+    assert any("treat this as a guess" in w for w in result.warnings)
     assert result.closest is not None and result.closest.observation.rtt_ms == 140.0
+    assert result.accuracy is not None and result.accuracy.headline_pct <= 10
 
 
-def test_a_closest_node_beyond_the_cutoff_is_not_enough_to_name_a_place() -> None:
+def test_a_far_closest_node_only_adds_a_warning() -> None:
     nodes = HUBS[:4]
-    just_inside = [
-        E.Observation(n.name, n.name, n.latitude, n.longitude, E.MAX_CLOSEST_RTT_MS - 1 + i, True)
+    inside = [
+        E.Observation(n.name, n.name, n.latitude, n.longitude, E.FAR_CLOSEST_RTT_MS - 1 + i, True)
         for i, n in enumerate(nodes)
     ]
-    just_outside = [
-        E.Observation(n.name, n.name, n.latitude, n.longitude, E.MAX_CLOSEST_RTT_MS + 1 + i, True)
+    outside = [
+        E.Observation(n.name, n.name, n.latitude, n.longitude, E.FAR_CLOSEST_RTT_MS + 1 + i, True)
         for i, n in enumerate(nodes)
     ]
-    assert E.estimate(just_inside).status == "estimated"
-    assert E.estimate(just_outside).status == "insufficient_evidence"
+    assert not any("guess" in w for w in E.estimate(inside).warnings)
+    far = E.estimate(outside)
+    assert far.status == "estimated" and any("guess" in w for w in far.warnings)
 
 
-def test_nodes_that_contradict_each_other_at_any_real_speed_mean_no_single_place() -> None:
+def test_nodes_that_contradict_each_other_at_any_real_speed_are_flagged_not_refused() -> None:
     """3,600 km apart and both 14 ms away: light in vacuum would allow it (4,200 km), no path does."""
     a = E.Observation("a", "Madrid", 40.42, -3.70, 14.0, True)
     b = E.Observation("b", "Cairo", 30.04, 31.24, 14.0, True)
     c = E.Observation("c", "Rome", 41.9, 12.5, 14.0, True)
     assert E.haversine_km(a.latitude, a.longitude, b.latitude, b.longitude) > 3300
     result = E.estimate([a, b, c])
-    assert result.status == "inconclusive"
+    assert result.status == "estimated" and result.conflicting and result.likely is not None
+
+
+def test_nodes_that_agree_are_not_flagged() -> None:
+    result = E.estimate(observe(city("Paris", "FR"), HUBS, 1.7, random.Random(2)))
+    assert not result.conflicting
 
 
 def test_the_closest_node_gives_a_physical_bound_not_a_guess() -> None:
@@ -224,7 +250,25 @@ def test_the_answer_is_deterministic_and_limitations_always_travel_with_it() -> 
     assert len(a.limitations) >= 3 and any("anycast" in t.lower() for t in a.limitations)
 
 
-def test_no_percentages_or_accuracy_claims_in_the_output() -> None:
+def test_every_estimate_carries_how_accurate_answers_like_it_have_been() -> None:
     result = E.estimate(observe(city("Paris", "FR"), HUBS, 1.7, random.Random(2)))
-    text = result.summary + " ".join(result.warnings)
-    assert "%" not in text and "accurate" not in text.lower() and "confidence" not in text.lower()
+    assert result.accuracy is not None
+    acc = result.accuracy
+    assert acc.headline_km == 500 and acc.by_radius[500] == acc.headline_pct
+    assert sorted(acc.by_radius) == [100, 300, 500, 1000, 2000]
+    assert all(1 <= pct <= 99 for pct in acc.by_radius.values())
+    # a wider radius is never less likely to hold the truth
+    values = [acc.by_radius[r] for r in sorted(acc.by_radius)]
+    assert values == sorted(values)
+
+
+def test_accuracy_never_rises_as_the_closest_node_gets_further_away() -> None:
+    from ipping_backend.geolocation.accuracy import RADII_KM, accuracy_for
+
+    previous = {r: 100 for r in RADII_KM}
+    for ms in (0.5, 1, 3, 7, 12, 18, 25, 35, 50, 70, 100, 200, 5000):
+        now = accuracy_for(ms).by_radius
+        assert all(now[r] <= previous[r] for r in RADII_KM), (ms, now, previous)
+        previous = now
+    # a node next door pins it down, one on the other side of the world says little
+    assert accuracy_for(1).headline_pct >= 95 and accuracy_for(300).headline_pct <= 10

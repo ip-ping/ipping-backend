@@ -8,7 +8,7 @@ This repository is the coordinator. It validates targets, schedules work onto no
 aggregates results, estimates where an address appears to be, and owns the contracts the other two
 repositories build against.
 
-Current release: **v0.9.0** (database migration head `0012`). Nodes of any earlier version keep
+Current release: **v0.9.0** (database migration head `0012`; v0.10.0 is on `main`, not released). Nodes of any earlier version keep
 working for ping; TCP, HTTP and traceroute need node v0.3.0 or newer, DNS checks need node v0.4.0, traceroute rounds and certificate checks need node v0.5.0, and DNS over HTTPS and QUIC need node v0.6.0 (DNS over HTTPS to quad9 needs v0.7.0, which speaks HTTP/2); a measurement that asks for either goes only to nodes that have it.
 
 | Repository | Role |
@@ -227,55 +227,84 @@ method is built around what it can and cannot know:
 
 1. **Hard limits.** A node that measured `r` ms heard from the target within `150 * r` km (light
    cannot go faster). Places outside any node's limit are impossible. If two nodes' limits cannot
-   overlap, the answer is *inconclusive*: "a single location could not be established; possible
-   explanations include anycast, routing differences, or unreliable observations". It never declares
-   anycast on its own.
+   overlap, the nodes *disagree* (`conflicting: true`): "no single place fits all of them; possible
+   explanations include anycast, routing differences, or unreliable observations". The estimate is
+   then made from the nearest node and the nodes that agree with it, and the answer says so. It
+   never declares anycast on its own.
 2. **Ranking.** The remaining cities (GeoNames, 3,399 cities of 100,000+ people, see `NOTICE`) are
    scored by how well the times fit an internet path, with the path-length factor (1.2 to 3 times the
-   fibre distance) fitted per place. Nodes with unverified coordinates count for less.
-3. **Honest output.** The result lists its evidence, the other plausible regions, warnings, and a
-   strength label (`low`, `moderate`, `strong`), never a percentage or radius for *this* answer.
-   "Insufficient evidence" (fewer than 3 nodes with known coordinates, or no node closer than 40 ms)
-   and "inconclusive" are normal answers. It needs the nodes to have measured the same address.
-   When each node resolved the name itself (the default) and they did not all get one, the nodes are
-   grouped by the address they measured: the estimate is for the address most of them measured, the
-   others are listed under `groups`, and `?ip=` asks for another. Round trips to different servers
-   are never put into one estimate.
+   fibre distance) fitted per place; a tie goes to the city nearest the nearest node. Nodes with
+   unverified coordinates count for less.
+3. **Always an answer, with its odds.** Whenever one node with a known position measured the address
+   there is an estimate, however thin the evidence: fewer than 3 nodes, a closest node over 40 ms
+   away, or nodes that disagree are *warnings*, not reasons to refuse (the only answer without a
+   place is a measurement that no node with a position took part in). The result lists its evidence,
+   the other plausible regions, a strength label (`low`, `moderate`, `strong`) and an **accuracy**:
+   `accuracy.percent` is the share of answers, on real targets of known position, that were within
+   `accuracy.radius_km` (500) of the truth when the closest node was about as far away as it was here,
+   and `by_radius` gives the same for 100, 300, 500, 1,000 and 2,000 km (never 0 or 100). It is a
+   measured rate for answers like this one, not a probability for this address, and it cannot know
+   what the closest node's round trip does not say (see the table below). It needs the nodes to have
+   measured the same address. When each node resolved the name itself (the default) and they did not
+   all get one, the nodes are grouped by the address they measured: the estimate is for the address
+   most of them measured, the others are listed under `groups`, and `?ip=` asks for another. Round
+   trips to different servers are never put into one estimate.
 
 **How well does it work?** Checked on real measurements, not only synthetic ones. The data
 (`calibration/`, collected by `scripts/collect_atlas.py`) is public [RIPE Atlas](https://atlas.ripe.net)
 data: the round trip measured from about 1,000 anchors (well-run hosts in data centres, positions
 known) to each of 56 anchors in 40 countries, plus pings to anycast root servers. A "fleet" is a
-random 4, 8, 16 or 32 of those anchors standing in for an ipping deployment; the estimator is asked
-where the target is and the answer is compared with the truth. Targets were split in two: constants
-were tuned on one half and the numbers below are the **other, untouched half** (28 anchors, 3,360
-fleets; `calibration/result-test-multilateration-4.txt`).
+random 1, 2, 4, 8, 16 or 32 of those anchors standing in for an ipping deployment; the estimator is
+asked where the target is and the answer is compared with the truth. Targets were split in two:
+constants and the accuracy table were fitted on one half and the numbers below are the **other,
+untouched half** (26 anchors, 5,040 fleets; `calibration/result-test-multilateration-5.txt`).
 
-| label | share of answers | within 100 km | within 300 km | within 500 km | within 1,000 km | median error | 9 in 10 within |
+The **accuracy** follows how close the closest node was (`geolocation/accuracy.py`, a table that
+`scripts/evaluate_location.py --fit-accuracy` fits on the calibration half and never lets rise as
+the closest node gets further; `calibration/accuracy-fit-multilateration-5.txt`). What it said, and
+how often it came true on the held-out half, for the 500 km figure shown first:
+
+| closest node | test fleets | said within 500 km | was | said within 1,000 km | was | said within 100 km | was |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| `strong` | 12% | 78% | 100% | 100% | 100% | 8 km | 190 km |
-| `moderate` | 10% | 13% | 77% | 99% | 100% | 250 km | 360 km |
-| `low` | 42% | 5% | 30% | 49% | 75% | 530 km | 1,750 km |
-| no answer (closest node over 40 ms) | 36% | | | | | | |
+| up to 2 ms | 273 | 99% | 100% | 99% | 100% | 97% | 94% |
+| 2 to 5 ms | 162 | 99% | 100% | 99% | 100% | 25% | 57% |
+| 5 to 10 ms | 475 | 96% | 98% | 99% | 100% | 9% | 8% |
+| 10 to 15 ms | 491 | 72% | 70% | 97% | 96% | 9% | 7% |
+| 15 to 20 ms | 380 | 49% | 43% | 81% | 80% | 6% | 4% |
+| 20 to 30 ms | 512 | 28% | 26% | 54% | 55% | 3% | 2% |
+| 30 to 40 ms | 363 | 19% | 21% | 47% | 45% | 3% | 3% |
+| 40 to 60 ms | 388 | 17% | 12% | 31% | 28% | 3% | 2% |
+| 60 to 80 ms | 229 | 15% | 9% | 25% | 24% | 3% | 1% |
+| 80 to 120 ms | 537 | 9% | 9% | 18% | 15% | 2% | 2% |
+| over 120 ms | 1,230 | 7% | 5% | 13% | 9% | 2% | 1% |
+
+On the held-out half the stated and the true share differ by under 7 points over all answers, and the
+Brier score is 0.096 (0 is perfect, 0.25 a coin toss). The table is least reliable where there is
+least data: a closest node 2 to 5 ms away said 25% within 100 km and was right 57% of the time (the
+cities of a region are rarely further than that), and over 80 ms it is a little optimistic. The
+strength label, which also looks at how well the nodes agree with each other, on all fleets: `strong`
+8% of answers, 79% within 100 km, 100% within 300 km, median 21 km; `moderate` 7%, 80% within 300 km,
+99% within 500 km, median 205 km; `low` 85%, 24% within 500 km, median 1,500 km.
 
 What this says, and does not:
 
-* The error grows with how far the *closest* node is: median 7 km when a node is within 5 ms, 250 km
-  within 10 ms, 390 km within 20 ms, 920 km within 40 ms. Past 40 ms answers were usually more than
-  1,000 km off, so the estimator now declines to answer (it used to give a place anyway; those
-  answers had a median error above 2,000 km).
-* Before this calibration (model 3, same held-out half) the median error of all answers was 658 km
-  and `strong` was within 100 km only 72% of the time. Fitting the fixed delay of a real path (8 ms,
-  not 1 ms) cut the median error for a closest node 10 to 20 ms away from 658 to 391 km (5 to 10 ms:
-  326 to 250 km; 20 to 40 ms: 1,257 to 920 km). Withholding answers beyond 40 ms brings the median of
-  all answers to 293 km. Only the base delay, the evidence cut-off, the `moderate` rule and the
-  contradiction bound changed; the other constants were tried and left alone.
-* **Anycast is detected, not guessed.** Across 1,120 random fleets measuring seven anycast root
-  servers, 95% were reported as "inconclusive" (nodes that cannot all be close to one place); with 16
-  or more nodes it was 558 of 560. The rest were fleets with nodes close together, which see one
-  instance and cannot tell. Across 6,720 real unicast fleets (both halves) the same check never fired
-  falsely. (The contradiction bound, 110 km per round-trip millisecond, was chosen from the physics
-  and the calibration half; the held-out half then confirmed it.)
+* The error grows with how far the *closest* node is: median 21 km when a node is within 5 ms, 245
+  km within 10 ms, 415 km within 20 ms, 990 km within 40 ms, and thousands of km past 80 ms, where the
+  honest answer is "somewhere on that side of the world" and the accuracy says so (about 6% within
+  500 km). Fewer nodes mostly mean a further closest node: the median over all answers is 3,350 km
+  for 1 node, 1,320 km for 4, 630 km for 32 nodes (low answers).
+* The estimator used to decline in three cases: fewer than 3 nodes, a closest node over 40 ms, and
+  nodes that disagreed (36% of these random fleets got no answer). It now answers all of them and
+  leaves the judgement to the accuracy figure and the warnings. What that costs: answers in the low
+  label are now most of the answers and their median error is 1,500 km instead of 530 km, because the
+  fleets that were declined are in it. Answers with a closest node within 40 ms are unchanged.
+* **Anycast is flagged, not guessed.** Across 1,260 random fleets measuring seven anycast root
+  servers, 72% had nodes that disagree; with 16 or more nodes it was 417 of 420, with 8 nodes 97%,
+  with 4 nodes 88%, with 2 nodes 50% (and a single node cannot disagree). The rest were fleets with
+  nodes close together, which see one instance and cannot tell. Across the real unicast fleets of both
+  halves the same check never fired falsely. The estimate for a disagreeing set is a place near the
+  nearest node and is never `strong`; its accuracy is the table's for that closest node, which assumes
+  one true place, so the real figure is lower and the answer says that.
 * The 60 targets are anchors in data centres, mostly in well-connected places; a home connection, a
   mobile network or a CDN edge may behave differently. The random fleets are drawn from an anchor
   pool that is heavy in Europe and North America, and your own nodes will be spread differently: the
@@ -480,6 +509,7 @@ first because the application release pins it.
 
 | Release | Database head | Notes |
 |---|---|---|
+| v0.10.0 | `0012` | **the location estimate is not strict any more**: an answer whenever any node with a position measured the address (fewer than 3 nodes, a far closest node and nodes that disagree are warnings, not refusals), an `accuracy` percentage measured on real targets (`accuracy.percent` within `radius_km`, `by_radius`), and `conflicting` when the nodes disagree (model `multilateration-5`; no database change) |
 | v0.9.0 | `0012` | **each node resolves a hostname itself by default** (`dns_mode` is `regional`; it was `fixed`), and `resolve_node_id` lets one chosen node resolve it for every node (migration `0012` adds `measurements.resolved_by`); the location estimate works for names the nodes resolved themselves, by the address each measured (`groups`, `?ip=`) |
 | v0.8.1 | `0011` | fix: a node's place from the IP data is only used where it agrees with the place the node reported or an administrator typed (a different country, a position or a known city more than 300 km away is a conflict; the provider and AS number are still filled in), and a record with no city is not used as a position |
 | v0.8.0 | `0011` | IP data: MaxMind GeoLite2 downloaded and kept up to date from the admin page, `GET /api/v1/ip`, and nodes filled in from their address (migration `0011` adds `nodes.auto_fields`) |
@@ -568,7 +598,7 @@ Small steps, each one committed and logged in [CHANGELOG.md](CHANGELOG.md).
 - [x] The network and place of each router on a traced path (from the GeoIP databases; the route map is in the web interface)
 - [x] Every kind over IPv6 with global addresses and the real policy, in a network-namespace lab (node CI); see the node README for what that does and does not prove
 - [ ] Over the real public IPv6 internet (needs a host with IPv6 connectivity; neither the development machine nor CI runners have it)
-- [x] Estimated network location: constraint-based, evidence listed, explicit "insufficient evidence"
+- [x] Estimated network location: constraint-based, evidence listed, always an answer when any node with a position took part, with an accuracy percentage measured on real targets and the disagreement of nodes (anycast) said, not refused
 - [x] Calibrate the location model against real targets of known location (RIPE Atlas anchors; held-out half reported)
 - [x] MaxMind GeoLite2 from the admin page (account ID and license key, downloaded, checked, kept up to date), a lookup API at `/api/v1/ip` with settings, and nodes filled in from their address
 - [x] Name resolution is a choice: each node resolves a hostname itself (default), or one chosen node resolves it for all; the location estimate follows the address each node measured

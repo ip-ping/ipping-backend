@@ -1,0 +1,31 @@
+model multilateration-5: fitted on 5040 calibration answers, checked on 5040 test answers
+
+EDGES_MS = (2.0, 5.0, 10.0, 15.0, 20.0, 30.0, 40.0, 60.0, 80.0, 120.0, float("inf"))
+TABLE = (
+    (97, 99, 99, 99, 99),  # closest node up to 2.0 ms (172 calibration answers)
+    (25, 99, 99, 99, 99),  # closest node up to 5.0 ms (158 calibration answers)
+    (9, 61, 96, 99, 99),  # closest node up to 10.0 ms (393 calibration answers)
+    (9, 42, 72, 97, 99),  # closest node up to 15.0 ms (412 calibration answers)
+    (6, 27, 49, 81, 99),  # closest node up to 20.0 ms (383 calibration answers)
+    (3, 12, 28, 54, 91),  # closest node up to 30.0 ms (648 calibration answers)
+    (3, 12, 19, 47, 74),  # closest node up to 40.0 ms (334 calibration answers)
+    (3, 10, 17, 31, 56),  # closest node up to 60.0 ms (506 calibration answers)
+    (3, 10, 15, 25, 49),  # closest node up to 80.0 ms (277 calibration answers)
+    (2, 5, 9, 18, 46),  # closest node up to 120.0 ms (488 calibration answers)
+    (2, 4, 7, 13, 25),  # closest node up to inf ms (1269 calibration answers)
+)
+
+closest node   test runs   ≤ 100 km (said/was)   ≤ 300 km (said/was)   ≤ 500 km (said/was)   ≤1000 km (said/was)   ≤2000 km (said/was)
+0-2 ms               273      97% /   94%           99% /  100%           99% /  100%           99% /  100%           99% /  100%     
+2-5 ms               162      25% /   57%           99% /   99%           99% /  100%           99% /  100%           99% /  100%     
+5-10 ms              475       9% /    8%           61% /   71%           96% /   98%           99% /  100%           99% /  100%     
+10-15 ms             491       9% /    7%           42% /   43%           72% /   70%           97% /   96%           99% /  100%     
+15-20 ms             380       6% /    4%           27% /   25%           49% /   43%           81% /   80%           99% /   99%     
+20-30 ms             512       3% /    2%           12% /   14%           28% /   26%           54% /   55%           91% /   90%     
+30-40 ms             363       3% /    3%           12% /   15%           19% /   21%           47% /   45%           74% /   71%     
+40-60 ms             388       3% /    2%           10% /    7%           17% /   12%           31% /   28%           56% /   54%     
+60-80 ms             229       3% /    1%           10% /    3%           15% /    9%           25% /   24%           49% /   46%     
+80-120 ms            537       2% /    2%            5% /    5%            9% /    9%           18% /   15%           46% /   31%     
+120-∞ ms            1230       2% /    1%            4% /    4%            7% /    5%           13% /    9%           25% /   18%     
+
+Brier score on the test half (0 is perfect, 0.25 is a coin toss): 0.096

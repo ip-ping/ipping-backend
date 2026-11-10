@@ -1,6 +1,41 @@
 {
   "components": {
     "schemas": {
+      "AccuracyOut": {
+        "description": "How often answers like this one were right on real targets of known position (RIPE Atlas anchors).",
+        "properties": {
+          "basis": {
+            "description": "What the figure is a rate of, in words: it is not a probability for this address",
+            "title": "Basis",
+            "type": "string"
+          },
+          "by_radius": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "description": "The same share for 100, 300, 500, 1000 and 2000 km (keys are the radii)",
+            "title": "By Radius",
+            "type": "object"
+          },
+          "percent": {
+            "description": "The share of such answers within `radius_km` of the truth (1 to 99, never certainty)",
+            "title": "Percent",
+            "type": "integer"
+          },
+          "radius_km": {
+            "title": "Radius Km",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "percent",
+          "radius_km",
+          "by_radius",
+          "basis"
+        ],
+        "title": "AccuracyOut",
+        "type": "object"
+      },
       "AddressGroupOut": {
         "description": "One address that some of the nodes measured, when they did not all measure the same one.",
         "properties": {
@@ -2136,6 +2171,17 @@
       },
       "LocationEstimateOut": {
         "properties": {
+          "accuracy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AccuracyOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How accurate answers like this are, measured on real targets: the share within each radius. Given whenever there is a likely place."
+          },
           "alternatives": {
             "default": [],
             "items": {
@@ -2164,6 +2210,12 @@
                 "type": "null"
               }
             ]
+          },
+          "conflicting": {
+            "default": false,
+            "description": "The nodes disagree about where the address is (anycast, a rerouted path, a bad measurement); the estimate is made from the nearest node and the nodes that agree with it",
+            "title": "Conflicting",
+            "type": "boolean"
           },
           "evidence": {
             "default": [],
@@ -5394,7 +5446,7 @@
   },
   "info": {
     "title": "ipping backend",
-    "version": "0.9.0"
+    "version": "0.10.0"
   },
   "openapi": "3.1.0",
   "paths": {
