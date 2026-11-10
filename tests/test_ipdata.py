@@ -408,16 +408,105 @@ def test_what_the_node_reported_or_an_administrator_typed_is_not_overwritten(
 ) -> None:
     api.become_admin()
     _geoip(api, tmp_path / "geoip")
-    node = _node(api, country="NL", city="Utrecht", provider="My own network")  # said by the node
+    node = _node(api, country="DE", city="Hanau", provider="My own network")  # said by the node
     _address(api, node)
     filled = api.post(f"/api/v1/admin/nodes/{node}/autofill").json()
     assert (filled["country"], filled["city"], filled["provider"]) == (
-        "NL",
-        "Utrecht",
+        "DE",
+        "Hanau",
         "My own network",
     )
     assert filled["region"] == "Hesse" and filled["asn"] == 15133  # the rest comes from the data
     assert filled["auto_fields"] == ["region", "latitude", "longitude", "asn"]
+
+
+def test_the_datas_place_is_not_used_where_it_contradicts_the_place_given(
+    api: Api, tmp_path: Path
+) -> None:
+    """The data says Frankfurt. A node that said another country, or a city far from there, keeps its own place: the
+    estimate trusts a node's position, and a hosting address is often placed at its provider's headquarters."""
+    api.become_admin()
+    _geoip(api, tmp_path / "geoip")  # Frankfurt am Main, DE
+    other_country = _node(api, country="NL", city="Utrecht")
+    far_city = _node(
+        api, country="DE", city="Berlin"
+    )  # the gazetteer knows Berlin: about 420 km away
+    near_city = _node(api, country="DE", city="Frankfurt am Main")
+    for node in (other_country, far_city, near_city):
+        _address(api, node)
+        api.post(f"/api/v1/admin/nodes/{node}/autofill")
+    for node in (other_country, far_city):
+        said = _admin_node(api, node)
+        assert (said["region"], said["latitude"], said["longitude"]) == (None, None, None)
+        assert (said["provider"], said["asn"]) == (
+            "Edgecast",
+            15133,
+        )  # about the address, not a place
+        assert said["auto_fields"] == ["provider", "asn"]
+    agreeing = _admin_node(api, near_city)
+    assert (agreeing["region"], agreeing["latitude"]) == ("Hesse", 50.11)
+    assert agreeing["auto_fields"] == ["region", "latitude", "longitude", "provider", "asn"]
+
+
+def test_a_typed_position_far_from_the_data_is_kept_and_the_data_keeps_out(
+    api: Api, tmp_path: Path
+) -> None:
+    api.become_admin()
+    _geoip(api, tmp_path / "geoip")
+    far, near = _node(api, country=None, city=None), _node(api, country=None, city=None)
+    for node, (lat, lon) in ((far, (52.52, 13.40)), (near, (50.0, 8.5))):
+        _address(api, node)
+        api.patch(f"/api/v1/admin/nodes/{node}", {"latitude": lat, "longitude": lon})
+    kept = _admin_node(api, far)
+    assert (kept["latitude"], kept["longitude"]) == (52.52, 13.4)
+    assert (kept["country"], kept["city"], kept["region"]) == (None, None, None)
+    assert kept["auto_fields"] == ["provider", "asn"]
+    close = _admin_node(api, near)
+    assert (close["latitude"], close["longitude"]) == (50.0, 8.5)  # still theirs
+    assert (close["country"], close["city"]) == ("DE", "Frankfurt am Main")  # agreeing: filled in
+    assert "latitude" not in close["auto_fields"]
+
+
+def test_typing_a_place_that_disagrees_takes_back_what_the_data_supplied(
+    api: Api, tmp_path: Path
+) -> None:
+    api.become_admin()
+    _geoip(api, tmp_path / "geoip")
+    node = _node(api, country=None, city=None)
+    _address(api, node)
+    api.post(f"/api/v1/admin/nodes/{node}/autofill")
+    typed = api.patch(f"/api/v1/admin/nodes/{node}", {"country": "NL"}).json()
+    assert typed["country"] == "NL"
+    assert (typed["region"], typed["city"], typed["latitude"], typed["longitude"]) == (None,) * 4
+    assert typed["auto_fields"] == ["provider", "asn"]
+    back = api.patch(f"/api/v1/admin/nodes/{node}", {"country": None}).json()
+    assert (back["country"], back["city"], back["latitude"]) == ("DE", "Frankfurt am Main", 50.11)
+    assert back["auto_fields"] == [
+        "country",
+        "region",
+        "city",
+        "latitude",
+        "longitude",
+        "provider",
+        "asn",
+    ]
+
+
+def test_a_record_with_no_city_is_not_a_position_for_a_node(api: Api, tmp_path: Path) -> None:
+    api.become_admin()
+    _geoip(
+        api,
+        tmp_path / "geoip",
+        {
+            "country": {"iso_code": "DE", "names": {"en": "Germany"}},
+            "location": {"latitude": 51.0, "longitude": 9.0, "accuracy_radius": 1000},
+        },
+    )
+    node = _node(api, country=None, city=None)
+    _address(api, node)
+    filled = api.post(f"/api/v1/admin/nodes/{node}/autofill").json()
+    assert filled["country"] == "DE"
+    assert (filled["city"], filled["latitude"], filled["longitude"]) == (None, None, None)
 
 
 def test_typing_a_value_makes_it_yours_and_clearing_it_hands_it_back(

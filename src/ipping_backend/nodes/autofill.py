@@ -9,15 +9,29 @@ The rule is simple and never surprising:
 
 An administrator who edits a field makes it theirs (it leaves `auto_fields`); clearing it makes it automatic again. A position
 that comes from the data is a city's, not the node's: `location_verified` is never set here.
+
+The data's *place* (country, region, city, position) is only used where it agrees with the place somebody gave. A hosting
+address is often placed at its provider's headquarters, and the location estimate trusts a node's position, so the data must
+never put a position next to a country or city it contradicts:
+
+* a country that was typed or reported, and is not the data's, is a conflict;
+* so is a typed position more than `CONFLICT_KM` from the data's, and a typed or reported city that the gazetteer places that
+  far from it (a city it does not know says nothing);
+* on a conflict no place is taken from the data, and any place it supplied earlier is taken back (the provider and the AS
+  number belong to the address, not to a place, and are still filled in);
+* a record with no city name is a country's or region's centre, not a place a node can be: its position is not used.
 """
 
 from __future__ import annotations
 
+from functools import lru_cache
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from ..geolocation.estimate import haversine_km
+from ..geolocation.gazetteer import cities
 from ..geolocation.geoip import GeoIp
 from ..ipdata.lookup import lookup
 from ..ipdata.options import load_options
@@ -27,6 +41,10 @@ from ..models import Node
 AUTO_FIELDS = ("country", "region", "city", "latitude", "longitude", "provider", "asn")
 # latitude and longitude are one fact: both or neither
 _GROUPS = (("country",), ("region",), ("city",), ("latitude", "longitude"), ("provider",), ("asn",))
+_PLACE = {("country",), ("region",), ("city",), ("latitude", "longitude")}
+# How far the data's position may be from the place somebody gave before the data is not used. City-level databases are
+# right to a few tens of kilometres for the same metropolitan area; hosting addresses that are wrong are wrong by far more.
+CONFLICT_KM = 300.0
 
 
 def values_from(info: IpInfoOut) -> dict[str, Any]:
@@ -47,6 +65,45 @@ def _empty(value: Any) -> bool:
     return value is None or value == ""
 
 
+@lru_cache(maxsize=1)
+def _named() -> dict[tuple[str, str], tuple[float, float]]:
+    """(country, lower-case city name) -> the position of the biggest city of that name."""
+    best: dict[tuple[str, str], tuple[int, float, float]] = {}
+    for city in cities():
+        key = (city.country, city.name.lower())
+        if key not in best or city.population > best[key][0]:
+            best[key] = (city.population, city.latitude, city.longitude)
+    return {key: (lat, lon) for key, (_, lat, lon) in best.items()}
+
+
+def _conflicts(node: Node, auto: list[str], values: dict[str, Any]) -> bool:
+    """Whether the data's place contradicts a place that was typed or reported (fields in `auto` are the data's own)."""
+
+    def theirs(field: str) -> bool:
+        return field not in auto and not _empty(getattr(node, field))
+
+    country = values.get("country")
+    if theirs("country") and country and str(node.country).upper() != str(country).upper():
+        return True
+    if "latitude" not in values:
+        return False
+    lat, lon = float(values["latitude"]), float(values["longitude"])
+    typed_lat, typed_lon = node.latitude, node.longitude
+    if (
+        theirs("latitude")
+        and theirs("longitude")
+        and typed_lat is not None
+        and typed_lon is not None
+        and haversine_km(typed_lat, typed_lon, lat, lon) > CONFLICT_KM
+    ):
+        return True
+    if theirs("city"):
+        where = _named().get((str(node.country or country or "").upper(), str(node.city).lower()))
+        if where is not None and haversine_km(where[0], where[1], lat, lon) > CONFLICT_KM:
+            return True
+    return False
+
+
 def fill(node: Node, geoip: GeoIp) -> list[str]:
     """Apply the data for `node.remote_addr` to the node. Returns the fields that changed."""
     if not node.remote_addr:
@@ -58,9 +115,22 @@ def fill(node: Node, geoip: GeoIp) -> list[str]:
     if not info.found:
         return []
     values = values_from(info)
+    if not info.city:
+        values.pop("latitude", None)  # no city: the centre of a country or region, which no node is
+        values.pop("longitude", None)
     auto = list(node.auto_fields or [])
     changed: list[str] = []
+    conflict = _conflicts(node, auto, values)
     for group in _GROUPS:
+        if conflict and group in _PLACE:
+            for field in (
+                group
+            ):  # somebody's own place disagrees with the data: what it supplied is taken back
+                if field in auto:
+                    auto.remove(field)
+                    setattr(node, field, None)
+                    changed.append(field)
+            continue
         if any(f not in values for f in group):
             continue  # the data does not have all of it
         following = all(f in auto for f in group)

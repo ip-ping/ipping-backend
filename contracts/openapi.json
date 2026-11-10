@@ -5334,7 +5334,7 @@
   },
   "info": {
     "title": "ipping backend",
-    "version": "0.8.0"
+    "version": "0.8.1"
   },
   "openapi": "3.1.0",
   "paths": {

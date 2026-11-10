@@ -348,6 +348,14 @@ field makes it yours, and clearing it hands it back. A position taken from the d
 never set by it. Admin nodes carry `auto_fields` (which fields are automatic), and `POST /api/v1/admin/nodes/{id}/autofill`
 fills one now. The whole thing can be switched off on the page, and turning it on fills what is empty at once.
 
+**The data never contradicts the place that was given.** A hosting address is often placed at its provider's headquarters, and
+the location estimate treats a node's position as a fact, so the data's *place* (country, region, city, position) is used only
+where it agrees with the place somebody gave: a typed or reported country that is not the data's, a typed position more than 300
+km from the data's, or a typed or reported city that the gazetteer places more than 300 km from it is a conflict. On a conflict no
+place comes from the data (and any it supplied earlier is taken back), while the provider and the AS number, which belong to the
+address and not to a place, are still filled in; fixing or clearing what disagrees lets the data fill the place again. A record
+with no city (the centre of a country or region) is never used as a position.
+
 ### Geofeeds as another claim (optional, opt-in)
 
 A geofeed (RFC 8805) is a CSV a network publishes at a URL of its choosing: `prefix,country,region,city,postal`. It is
@@ -457,6 +465,7 @@ first because the application release pins it.
 
 | Release | Database head | Notes |
 |---|---|---|
+| v0.8.1 | `0011` | fix: a node's place from the IP data is only used where it agrees with the place the node reported or an administrator typed (a different country, a position or a known city more than 300 km away is a conflict; the provider and AS number are still filled in), and a record with no city is not used as a position |
 | v0.8.0 | `0011` | IP data: MaxMind GeoLite2 downloaded and kept up to date from the admin page, `GET /api/v1/ip`, and nodes filled in from their address (migration `0011` adds `nodes.auto_fields`) |
 | v0.7.0 | `0010` | DNS over HTTPS to Quad9 (over HTTP/2, so only to nodes of v0.7.0 or newer); geofeeds (RFC 8805) from the feeds an administrator lists, shown next to the GeoIP place and checked the same way (`ipping-backend geofeed-update`) |
 | v0.6.1 | `0010` | fix: a node older than v0.6.0 is no longer asked for DNS over HTTPS or QUIC, which it answered the plain way without saying so |

@@ -269,7 +269,7 @@ async def update_node(
     for key, value in changes.items():
         setattr(node, key, value)
     handed_back = apply_edit(node, edited)
-    if handed_back:
+    if edited:  # a place that was typed may now agree, or disagree, with the data
         await fill_if_enabled(db, node, request.app.state.geoip)
     await _audit(
         db,

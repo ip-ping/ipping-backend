@@ -2,6 +2,28 @@
 
 Progress log for `ipping-backend`, newest first. Each entry is one small, tested step.
 
+## v0.8.1 (2026-11-10)
+
+Fix to the node auto-fill of v0.8.0, found when the released files were tried on a fresh machine: a node that reported
+DE / Falkenstein, whose address the database placed in California, ended up in Germany with a Californian region and position.
+The location estimate treats a node's position as a fact (a round trip bounds the distance), and a hosting address is often
+placed at its provider's headquarters, so that is not a cosmetic problem. No database change (still `0011`).
+
+### What changed
+- The data's **place** (country, region, city, position) is used only where it agrees with the place somebody gave. A conflict
+  is: a typed or reported country that is not the data's; a typed position more than 300 km from the data's; a typed or
+  reported city that the gazetteer places more than 300 km from it (a city it does not know says nothing). On a conflict no place
+  is taken from the data and any place it supplied earlier is taken back; the provider and the AS number, which belong to the
+  address, are still filled in. Fixing or clearing what disagrees lets the data fill the place again.
+- A record with **no city name** (the centre of a country or region) is no position for a node, and is not used as one.
+- Editing a node now reconciles at once: typing a country that disagrees with the automatic place takes the automatic place back
+  without waiting for the node to reconnect.
+
+### Tests
+- Five new tests (another country, a far and a near city, a typed position far and near, typing a disagreeing country and clearing
+  it, a record with no city); each rule fails its test when switched off. 433 pass on SQLite and 445 on PostgreSQL, with ruff and mypy
+  clean.
+
 ## v0.8.0 (2026-11-10)
 
 IP data: MaxMind GeoLite2 turned on from the admin page, a lookup API, and nodes filled in from their address. The database
