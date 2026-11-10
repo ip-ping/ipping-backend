@@ -774,7 +774,7 @@
                 "type": "null"
               }
             ],
-            "description": "dns: udp (the default) or doh, DNS over HTTPS (cloudflare and google; not the nodes' own resolvers, and not quad9, which answers only over HTTP/2). tls: tcp (the default) or quic, a QUIC handshake offering h3 over UDP",
+            "description": "dns: udp (the default) or doh, DNS over HTTPS (cloudflare, google and quad9; not the nodes' own resolvers; quad9 answers only over HTTP/2, which nodes speak from v0.7.0). tls: tcp (the default) or quic, a QUIC handshake offering h3 over UDP",
             "title": "Transport"
           }
         },
@@ -1140,6 +1140,18 @@
             ],
             "title": "Attribution"
           },
+          "claim": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "geofeed only: what the feed says, in its own words, when no place could be checked",
+            "title": "Claim"
+          },
           "distance_to_estimate_km": {
             "anyOf": [
               {
@@ -1161,6 +1173,18 @@
                 "type": "null"
               }
             ]
+          },
+          "prefix": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "geofeed only: the prefix the line is for",
+            "title": "Prefix"
           },
           "ruled_out_by": {
             "anyOf": [
@@ -1202,6 +1226,11 @@
           "city": {
             "title": "City",
             "type": "boolean"
+          },
+          "geofeed_entries": {
+            "default": 0,
+            "title": "Geofeed Entries",
+            "type": "integer"
           },
           "source": {
             "anyOf": [
@@ -1581,6 +1610,17 @@
             },
             "title": "Evidence",
             "type": "array"
+          },
+          "geofeed": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GeoIpOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the network's operator says in a geofeed (RFC 8805) the administrator listed, checked the same way"
           },
           "geoip": {
             "anyOf": [
@@ -4604,7 +4644,7 @@
   },
   "info": {
     "title": "ipping backend",
-    "version": "0.6.1"
+    "version": "0.7.0"
   },
   "openapi": "3.1.0",
   "paths": {

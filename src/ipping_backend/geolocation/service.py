@@ -12,7 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..models import LocationEstimate, Measurement, MeasurementTask, utcnow
 from . import estimate as E
 from .estimate import haversine_km
-from .geoip import GeoIp, rule_out, valid_ip
+from .geofeed import Entry, Geofeeds, host_of
+from .geoip import GeoIp, GeoPlace, rule_out, valid_ip
 from .schemas import (
     AlternativeOut,
     AsnOut,
@@ -114,6 +115,63 @@ def _to_out(
     )
 
 
+def _checked(
+    out: LocationEstimateOut,
+    place: GeoPlace | None,
+    source: str,
+    *,
+    attribution: str | None = None,
+    claim: str | None = None,
+    prefix: str | None = None,
+) -> GeoIpOut:
+    """A place somebody claims for the address, checked against this result's own verified nodes.
+
+    `consistent` only means no measurement contradicts it; `ruled_out` names the node that does.
+    """
+    if place is None:  # a claim with no place the gazetteer knows: shown, not checked
+        return GeoIpOut(
+            source=source,
+            claim=claim,
+            prefix=prefix,
+            verdict="not_checked",
+            attribution=attribution,
+        )
+    verified = [
+        (e.node_id, e.node_name, e.latitude, e.longitude, e.rtt_ms)
+        for e in out.evidence
+        if e.verified
+    ]
+    shown = PlaceOut(
+        name=place.name, country=place.country, latitude=place.latitude, longitude=place.longitude
+    )
+    to_estimate = (
+        round(
+            haversine_km(place.latitude, place.longitude, out.likely.latitude, out.likely.longitude)
+        )
+        if out.likely
+        else None
+    )
+    ruled = rule_out(place, verified) if verified else None
+    return GeoIpOut(
+        source=source,
+        place=shown,
+        claim=claim,
+        prefix=prefix,
+        verdict="not_checked" if not verified else "ruled_out" if ruled else "consistent",
+        distance_to_estimate_km=to_estimate,
+        ruled_out_by=RuledOutOut(
+            node_id=ruled.node_id,
+            node_name=ruled.node_name,
+            rtt_ms=ruled.rtt_ms,
+            distance_km=round(ruled.distance_km),
+            max_distance_km=round(ruled.max_distance_km),
+        )
+        if ruled
+        else None,
+        attribution=attribution,
+    )
+
+
 def with_geoip(out: LocationEstimateOut, geoip: GeoIp | None) -> LocationEstimateOut:
     """Add what the configured databases say, checked against this result's own measurements.
 
@@ -130,54 +188,44 @@ def with_geoip(out: LocationEstimateOut, geoip: GeoIp | None) -> LocationEstimat
     place = geoip.place(ip)
     if place is None:
         return out
-    verified = [
-        (e.node_id, e.node_name, e.latitude, e.longitude, e.rtt_ms)
-        for e in out.evidence
-        if e.verified
-    ]
-    shown = PlaceOut(
-        name=place.name, country=place.country, latitude=place.latitude, longitude=place.longitude
-    )
-    to_estimate = (
-        round(
-            haversine_km(place.latitude, place.longitude, out.likely.latitude, out.likely.longitude)
-        )
-        if out.likely
-        else None
-    )
-    if not verified:
-        out.geoip = GeoIpOut(
-            source=geoip.source,
-            place=shown,
-            verdict="not_checked",
-            distance_to_estimate_km=to_estimate,
-            attribution=geoip.attribution,
-        )
+    out.geoip = _checked(out, place, geoip.source, attribution=geoip.attribution)
+    return out
+
+
+def _claim(entry: Entry) -> str:
+    where = ", ".join(part for part in (entry.city, entry.region, entry.country) if part)
+    return where or "no place"
+
+
+def with_geofeed(out: LocationEstimateOut, geofeeds: Geofeeds | None) -> LocationEstimateOut:
+    """Add what the address's network says about itself in a geofeed the administrator listed.
+
+    Looked up on every request from the stored file, like the GeoIP databases, and checked the same way. It
+    never changes the estimate.
+    """
+    ip = valid_ip(out.target_ip)
+    found = geofeeds.lookup(ip) if geofeeds is not None and ip is not None else None
+    if geofeeds is None or found is None:
         return out
-    ruled = rule_out(place, verified)
-    out.geoip = GeoIpOut(
-        source=geoip.source,
-        place=shown,
-        verdict="ruled_out" if ruled else "consistent",
-        distance_to_estimate_km=to_estimate,
-        ruled_out_by=RuledOutOut(
-            node_id=ruled.node_id,
-            node_name=ruled.node_name,
-            rtt_ms=ruled.rtt_ms,
-            distance_km=round(ruled.distance_km),
-            max_distance_km=round(ruled.max_distance_km),
-        )
-        if ruled
-        else None,
-        attribution=geoip.attribution,
+    entry, prefix = found
+    out = out.model_copy(deep=True)
+    out.geofeed = _checked(
+        out,
+        geofeeds.place(entry),
+        f"Geofeed from {host_of(entry.source)}",
+        claim=_claim(entry),
+        prefix=prefix,
     )
     return out
 
 
 async def location_for(
-    db: AsyncSession, measurement: Measurement, geoip: GeoIp | None = None
+    db: AsyncSession,
+    measurement: Measurement,
+    geoip: GeoIp | None = None,
+    geofeeds: Geofeeds | None = None,
 ) -> LocationEstimateOut:
-    return with_geoip(await _stored_or_new(db, measurement), geoip)
+    return with_geofeed(with_geoip(await _stored_or_new(db, measurement), geoip), geofeeds)
 
 
 async def _stored_or_new(db: AsyncSession, measurement: Measurement) -> LocationEstimateOut:

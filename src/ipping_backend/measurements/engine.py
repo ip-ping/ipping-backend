@@ -478,7 +478,7 @@ class MeasurementEngine:
             if present is not None:
                 online_approved += 1
                 if capable(present.capabilities) and proto.node_speaks(
-                    node.version, request.transport
+                    node.version, request.transport, request.resolver
                 ):
                     eligible.append(node)
         eligible.sort(key=lambda n: (n.country or "~", n.city or "~", n.name))
@@ -486,6 +486,10 @@ class MeasurementEngine:
             what = f"{request.kind} measurement"
             if request.transport is not None and request.transport in proto.TRANSPORT_SINCE:
                 what += f" over {'DoH' if request.transport == 'doh' else 'QUIC'}"
+                if request.transport == "doh" and request.resolver in proto.HTTP2_ONLY_DOH:
+                    what += (
+                        f" to {request.resolver} (it needs HTTP/2, which nodes speak from v0.7.0)"
+                    )
             raise MeasurementError(
                 "kind_not_supported",
                 f"None of the {online_approved} online nodes can run a {what} yet. "

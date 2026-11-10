@@ -31,11 +31,12 @@ DNS_RESOLVERS: dict[str, str] = {
 }
 
 # The same resolvers over HTTPS (RFC 8484): the name their certificate is for, and the path of the endpoint.
-# The node asks the resolver's address on port 443 and checks the certificate for that name. Quad9 is not here
-# on purpose: it answers DNS over HTTPS only over HTTP/2 (HTTP 505 for HTTP/1.1), which the nodes do not speak.
+# The node asks the resolver's address on port 443 and checks the certificate for that name. Quad9 answers only
+# over HTTP/2 (HTTP 505 for HTTP/1.1), which nodes speak from v0.7.0 (see `protocol.HTTP2_ONLY_DOH`).
 DOH_RESOLVERS: dict[str, tuple[str, str]] = {
     "cloudflare": ("cloudflare-dns.com", "/dns-query"),
     "google": ("dns.google", "/dns-query"),
+    "quad9": ("dns.quad9.net", "/dns-query"),
 }
 
 # An HTTP check is a handful of packets and a TLS handshake: more than a ping, far less than a
@@ -201,13 +202,8 @@ def plan_measurement(
             if resolver == "system":
                 raise PlanError(
                     "invalid_option",
-                    "DNS over HTTPS asks a public resolver (cloudflare or google), not each node's own.",
-                )
-            if resolver not in DOH_RESOLVERS:
-                raise PlanError(
-                    "invalid_option",
-                    f"{resolver} answers DNS over HTTPS only over HTTP/2, which the nodes do not speak. "
-                    "Use cloudflare or google, or ask it over plain DNS.",
+                    "DNS over HTTPS asks a public resolver (cloudflare, google or quad9), not each "
+                    "node's own.",
                 )
             host, path = DOH_RESOLVERS[resolver]
             options.update(transport="doh", doh_host=host, doh_path=path)

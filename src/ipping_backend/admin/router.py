@@ -431,6 +431,7 @@ class GeoIpStatus(BaseModel):
     city: bool
     asn: bool
     source: str | None = None
+    geofeed_entries: int = 0
 
 
 class ServiceStatus(BaseModel):
@@ -461,6 +462,7 @@ async def service_status(request: Request, admin: AdminUser, db: Db) -> ServiceS
             city=geoip.has_city,
             asn=geoip.has_asn,
             source=geoip.source if geoip.has_city or geoip.has_asn else None,
+            geofeed_entries=request.app.state.geofeeds.entries,
         ),
         nodes_online=len(await _online(request, db)),
         nodes_approved=by_status.get("approved", 0),

@@ -60,6 +60,11 @@ class GeoIpOut(BaseModel):
 
     source: str
     place: PlaceOut | None = None
+    claim: str | None = Field(
+        default=None,
+        description="geofeed only: what the feed says, in its own words, when no place could be checked",
+    )
+    prefix: str | None = Field(default=None, description="geofeed only: the prefix the line is for")
     verdict: Literal["consistent", "ruled_out", "not_checked"]
     distance_to_estimate_km: int | None = Field(
         default=None, description="From the place the database names to the likely place"
@@ -91,6 +96,10 @@ class LocationEstimateOut(BaseModel):
     limitations: list[str] = []
     geoip: GeoIpOut | None = Field(
         default=None, description="A configured GeoIP database's answer, checked against the nodes"
+    )
+    geofeed: GeoIpOut | None = Field(
+        default=None,
+        description="What the network's operator says in a geofeed (RFC 8805) the administrator listed, checked the same way",
     )
     asn: AsnOut | None = Field(
         default=None, description="The network, if an ASN database is set up"

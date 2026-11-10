@@ -2,6 +2,44 @@
 
 Progress log for `ipping-backend`, newest first. Each entry is one small, tested step.
 
+## v0.7.0 (2026-11-10)
+
+DNS over HTTPS to Quad9, and geofeeds. No database change (head `0010`). Nodes need v0.7.0 for the first; the second is
+the backend's alone.
+
+### DNS over HTTPS to Quad9
+- `transport` `doh` now accepts `resolver` `quad9` (`dns.quad9.net`). Quad9 answers only over HTTP/2, which nodes speak from
+  v0.7.0, so a measurement that asks for it goes only to nodes of that version or newer: a v0.6.x node would get "505 HTTP
+  Version Not Supported" and report a protocol error. `protocol.HTTP2_ONLY_DOH` names the resolvers and the version; when no
+  online node qualifies the error says so ("... a dns measurement over DoH to quad9 (it needs HTTP/2, which nodes speak from
+  v0.7.0) yet"), and Cloudflare and Google stay available to every v0.6.0 node.
+- 3 tests (which versions speak it, a mixed fleet, every node too old); the refusal that was tested for Quad9 is now
+  tested for a node's own resolver, which is still refused.
+
+### Geofeeds (RFC 8805), opt-in
+- `ipping-backend geofeed-update` fetches the geofeeds listed in `IPPING_GEOFEED_URLS` (or `--url`) into the GeoIP directory.
+  A result whose address a feed covers gains `geofeed`: the feed's host, the prefix, what the feed says (`claim`) and, when the
+  gazetteer knows the city, a verdict the way the GeoIP database's is (`ruled_out` by a node with a verified position,
+  `consistent`, `not_checked`). It never changes the estimate. The admin status says how many prefixes are loaded.
+- **Bounded on purpose**: only the listed feeds, only when the command runs (nothing leaves the server because of a
+  measurement); https only with redirects to https only, a host whose addresses are all public, 32 MB and 30 s a feed, 500,000
+  lines a feed and 1,000,000 in all; a line that is not a valid public prefix (not broader than a /8, or a /16 for IPv6), has a
+  bad country or says nothing is skipped and counted; a feed that fails keeps its lines; the file is replaced atomically and
+  read again when it changes.
+- Tried on the real feeds of Cloudflare, AS13030 and Telstra Global: 151,633, 4,158 and 1,020 prefixes (1.1 MB stored); an
+  http, a localhost and a name that does not resolve are refused with their reasons; an address in a Cloudflare line is placed
+  in Singapore or Tokyo with coordinates, an AS13030 line names a Swiss town the gazetteer lacks (shown as the claim), Telstra's
+  lines are country only.
+- **Discovery from the registries was weighed again with real numbers and left out**: the RIR databases that carry the
+  `geofeed:` attribute are about 340 MB, and RIPE's IPv6 file has 599,826 such lines for only 2,141 different feeds (one broker
+  accounts for 585,735), each a URL its owner chose. Listing the feeds you care about is the supported way.
+- 20 tests (the parser and what it skips, longest-prefix lookup, storage, a feed that fails, limits, https-only and redirects,
+  the result's verdicts, the admin count, the command); 388 on SQLite.
+- **Community nodes: signed results and reputation were reconsidered and still not built**, with the reasoning written down in
+  the README: signing proves which node, not that it told the truth (the credential already says which); a reputation has no
+  ground truth to score against but the same nodes; a known-answer check catches only a node that does no work and is passed by
+  a node that recognises it.
+
 ## v0.6.1 (2026-11-09)
 
 A fix found by installing the released v0.6.0 over a real v0.5.1 stack. No database change (head `0010`).

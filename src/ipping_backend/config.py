@@ -35,6 +35,9 @@ class Settings(BaseSettings):
     geoip_dir: str | None = None
     geoip_city_db: str | None = None
     geoip_asn_db: str | None = None
+    # Geofeeds (RFC 8805) of networks, as a comma-separated list of https URLs. Nothing is fetched until
+    # `ipping-backend geofeed-update` runs, and the result is kept in the GeoIP directory.
+    geofeed_urls: str | None = None
 
     log_level: str = "INFO"
     log_json: bool = True

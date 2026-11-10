@@ -216,6 +216,7 @@ def test_the_admin_can_see_whether_databases_are_loaded(api: Api, tmp_path: Path
         "city": False,
         "asn": False,
         "source": None,
+        "geofeed_entries": 0,
     }
     api.client.app.state.geoip = GeoIp(  # type: ignore[attr-defined]
         city_db(tmp_path / "dbip-city-lite.mmdb"), asn_db(tmp_path / "dbip-asn-lite.mmdb")
@@ -224,6 +225,7 @@ def test_the_admin_can_see_whether_databases_are_loaded(api: Api, tmp_path: Path
         "city": True,
         "asn": True,
         "source": "DB-IP Lite",
+        "geofeed_entries": 0,
     }
 
 

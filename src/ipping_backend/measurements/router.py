@@ -129,7 +129,7 @@ async def estimated_location(
 ) -> LocationEstimateOut:
     """Where the target address appears to be, from the nodes' round-trip times (experimental)."""
     measurement = await _authorized(db, measurement_id, session, key)
-    return await location_for(db, measurement, request.app.state.geoip)
+    return await location_for(db, measurement, request.app.state.geoip, request.app.state.geofeeds)
 
 
 @router.get("/{measurement_id}/path", response_model=PathOut)

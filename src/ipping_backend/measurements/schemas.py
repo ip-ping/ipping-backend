@@ -65,9 +65,9 @@ class CreateMeasurementRequest(BaseModel):
     transport: Literal["udp", "doh", "tcp", "quic"] | None = Field(
         default=None,
         description=(
-            "dns: udp (the default) or doh, DNS over HTTPS (cloudflare and google; not the nodes' "
-            "own resolvers, and not quad9, which answers only over HTTP/2). tls: tcp (the default) "
-            "or quic, a QUIC handshake offering h3 over UDP"
+            "dns: udp (the default) or doh, DNS over HTTPS (cloudflare, google and quad9; not the "
+            "nodes' own resolvers; quad9 answers only over HTTP/2, which nodes speak from v0.7.0). "
+            "tls: tcp (the default) or quic, a QUIC handshake offering h3 over UDP"
         ),
     )
     count: int | None = Field(

@@ -5,6 +5,7 @@ import logging
 import secrets
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI
@@ -20,6 +21,8 @@ from .cluster import Cluster
 from .config import Settings, get_settings
 from .db import make_engine, make_sessionmaker
 from .errors import install_error_handlers
+from .geolocation.geofeed import FILE_NAME as GEOFEED_FILE
+from .geolocation.geofeed import Geofeeds
 from .geolocation.geoip import GeoIp
 from .logging_config import configure_logging
 from .measurements import router as measurements_router
@@ -114,6 +117,9 @@ def create_app(
         app.state.watches = scheduler
         app.state.geoip = GeoIp.from_settings(
             settings.geoip_dir, settings.geoip_city_db, settings.geoip_asn_db
+        )
+        app.state.geofeeds = Geofeeds(
+            Path(settings.geoip_dir) / GEOFEED_FILE if settings.geoip_dir else None
         )
 
         if create_schema:

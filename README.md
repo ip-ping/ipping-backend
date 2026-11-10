@@ -8,8 +8,8 @@ This repository is the coordinator. It validates targets, schedules work onto no
 aggregates results, estimates where an address appears to be, and owns the contracts the other two
 repositories build against.
 
-Current release: **v0.6.1** (database migration head `0010`). Nodes of any earlier version keep
-working for ping; TCP, HTTP and traceroute need node v0.3.0 or newer, DNS checks need node v0.4.0, traceroute rounds and certificate checks need node v0.5.0, and DNS over HTTPS and QUIC need node v0.6.0 (a measurement that asks for either goes only to nodes that have it).
+Current release: **v0.7.0** (database migration head `0010`). Nodes of any earlier version keep
+working for ping; TCP, HTTP and traceroute need node v0.3.0 or newer, DNS checks need node v0.4.0, traceroute rounds and certificate checks need node v0.5.0, and DNS over HTTPS and QUIC need node v0.6.0 (DNS over HTTPS to quad9 needs v0.7.0, which speaks HTTP/2); a measurement that asks for either goes only to nodes that have it.
 
 | Repository | Role |
 |---|---|
@@ -97,6 +97,7 @@ bring up the backend together with the frontend, database and reverse proxy.
 | `IPPING_PENDING_GRACE_S` | `5` | How long a task waits for a node that is not connected before it is given up on |
 | `IPPING_GEOIP_DIR` | unset | Directory of GeoIP / ASN databases (`.mmdb`); the newest `*city*.mmdb` and `*asn*.mmdb` in it are used. `ipping-backend geoip-update` fills it |
 | `IPPING_GEOIP_CITY_DB` / `IPPING_GEOIP_ASN_DB` | unset | Explicit paths to a city and an ASN database instead of a directory |
+| `IPPING_GEOFEED_URLS` | unset | Comma-separated https addresses of geofeeds (RFC 8805) for `ipping-backend geofeed-update` to fetch into `IPPING_GEOIP_DIR`; nothing is fetched until that command runs |
 | `FORWARDED_ALLOW_IPS` | `127.0.0.1` | Reverse proxies whose `X-Forwarded-*` headers are trusted |
 
 Limits that an operator may need to change while running live in the database and are edited
@@ -195,7 +196,7 @@ interval (at least `min_watch_interval_s`, 60 s by default), and the rules of an
 | `http` | one request | scheme, port and path come from the URL (query strings are dropped); `follow_redirects` to follow up to 5; timings, status, certificate |
 | `tls` | one TLS handshake with no request after it (`transport` `quic` makes it a QUIC handshake over UDP offering `h3`, and the sample says `quic` and the protocol agreed) | the target is a name or an address, with a port from the allowed list (default 443; `host:port`, a URL or `port` give another); the node presents the name (SNI) and checks the certificate against the Mozilla roots. The sample carries the certificate: version, cipher, subject, issuer, validity, whether this node trusts it and why not, the names it is valid for and how many certificates the server sent. A certificate that is not trusted is an `error` (`tls_certificate_invalid`) that keeps all of that. A watch calls it good when it is trusted and has at least 14 days left, and a certificate that is valid but nearly out of time is `degraded`, not `down` |
 | `traceroute` | one hop | up to 30 hops, three probes each; `count` 1 to 10 repeats the trace like `mtr` (one more probe per hop and round, a second apart) and a hop then carries how many probes it got (`sent`) and every reply; non-public hops are shown as private; Linux nodes only (rounds need node v0.5.0 or newer) |
-| `dns` | one question to one resolver | the target is a name (an IP address or an internal name is refused); `record_type` `A` (default), `AAAA`, `CNAME`, `MX`, `NS`, `TXT` or `SOA`; `resolver` `system` (default: each node's own resolvers, what people near it get) or `cloudflare`, `google`, `quad9` (that public resolver, asked from every node); `transport` `doh` asks cloudflare or google over HTTPS (port 443, RFC 8484) instead of UDP (quad9 answers DNS over HTTPS only over HTTP/2, which the nodes do not speak, so it is refused with that reason). The backend never resolves the name, so a name that does not exist can be checked |
+| `dns` | one question to one resolver | the target is a name (an IP address or an internal name is refused); `record_type` `A` (default), `AAAA`, `CNAME`, `MX`, `NS`, `TXT` or `SOA`; `resolver` `system` (default: each node's own resolvers, what people near it get) or `cloudflare`, `google`, `quad9` (that public resolver, asked from every node); `transport` `doh` asks cloudflare, google or quad9 over HTTPS (port 443, RFC 8484) instead of UDP (quad9 answers only over HTTP/2, which nodes speak from v0.7.0; older nodes are left out of that question). The backend never resolves the name, so a name that does not exist can be checked |
 
 Each sample is one probe: for `ping` and `tcp` the round trip (a refused TCP connection is an `error`
 sample that keeps its time), for `http` the whole request with `detail` (`status_code`, DNS /
@@ -292,7 +293,40 @@ works too) and a result gains two things, neither of which changes the estimate:
 The databases are read from disk; a directory is looked at again every few seconds, so a first download after the
 server started, and a newer file each month, are picked up without a restart, and nothing is fetched while serving a
 request. DB-IP Lite is licensed CC BY 4.0 and the result
-carries the attribution it asks for. Geofeeds (RFC 8805) are not used.
+carries the attribution it asks for.
+
+### Geofeeds as another claim (optional, opt-in)
+
+A geofeed (RFC 8805) is a CSV a network publishes at a URL of its choosing: `prefix,country,region,city,postal`. It is
+the one source of a place that comes from the network's owner, so a result can show it next to the database's. Set
+`IPPING_GEOIP_DIR` and list the feeds you want in `IPPING_GEOFEED_URLS` (or give `--url` for each), then run
+`ipping-backend geofeed-update` (`ipping.sh geofeed-update --feed https://...` does it for an installation). A result
+whose address a feed covers gains `geofeed`: the feed's host, the prefix of the line, what it says in its own words
+(`claim`) and, when the gazetteer knows the city (an exact name, or the largest city that begins with it, such as
+"Frankfurt" for "Frankfurt am Main"), the same verdict as the database's: `ruled_out` (a node with a verified position heard
+from the address too quickly), `consistent`, or `not_checked`. A line with only a country, or a town the gazetteer does not
+have, is shown as written and not checked. It never changes the estimate.
+
+It is built so that nothing leaves the server because of a measurement and nothing unbounded comes in:
+
+* **Only the feeds you list are fetched, only when the command runs**, never while serving a request and never because a
+  measurement named an address. The result is one file in the GeoIP directory, replaced atomically and read again when it
+  changes; a feed that fails keeps the lines it had, and one you stop listing goes.
+* https only (a redirect to anything else is refused), a host whose addresses are all public, 32 MB and 30 seconds a feed,
+  500,000 lines a feed and 1,000,000 in all (the table is held in memory by every worker).
+* A line that is not a valid public prefix (no private ranges, nothing broader than a /8 or a /16 for IPv6 so a feed cannot
+  claim the internet), has a malformed country, or says nothing ("do not geolocate") is skipped and counted.
+
+What it is not: **a feed is a claim by the network's operator**. The cross-check can show a claim impossible; it cannot
+confirm one. Tried on the real feeds of Cloudflare (151,633 prefixes, 52 "do not geolocate" lines skipped), AS13030 (4,158)
+and Telstra Global (1,020): an address in a Cloudflare line is placed in Singapore or Tokyo with coordinates, an AS13030 line
+names a Swiss town the gazetteer lacks (shown as the claim), and Telstra's lines are country only.
+
+**Finding feeds is up to you.** A registry can say where a network's feed is (the `geofeed:` attribute in RIPE, APNIC and
+AFRINIC data, or a remark in ARIN's), but reading that for every address would send each target to a third party, and reading
+it in bulk is large: the RIR databases that carry the attribute are about 340 MB, and in RIPE's IPv6 file alone 599,826
+lines name only 2,141 different feeds, 585,735 of them one broker's. Neither is done; list the feeds of the networks you
+care about (your own, your providers', the ones you measure).
 
 Anycast addresses, CDN edges and VPN endpoints are located where they answer from, not where their
 operator or users are. To redo this: `uv run python scripts/collect_atlas.py` (needs the network) and
@@ -350,10 +384,10 @@ on the dead worker. The two-instance behaviour is covered by `tests/test_cluster
 * Traceroute needs Linux on the node (it uses the kernel's ICMP error queue).
 * A TCP or HTTP check connects to a destination the user chose, from the node's address, on the allowed ports only. Nodes should not be on networks where that is unwelcome.
 * Public IPv6 has not been tested end to end (the development machine has no IPv6 internet); IPv6
-  targets, IPv6 loopback and an IPv6 traceroute through network namespaces were.
+  targets, IPv6 loopback and an IPv6 traceroute through network namespaces were. (Nor does a GitHub-hosted runner have an IPv6 route: only a link-local address, checked, so CI cannot do it either.)
 * The location estimate is only as good as the nodes' coordinates and how close the nearest node is
   (see the table above); it is not a geolocation database. An optional GeoIP database can be set up as a
-  cross-check, but it never feeds the estimate. Geofeeds (RFC 8805) are not read: of six well-known networks only Cloudflare publishes one, and only as free text in an ARIN remark ("Geofeed: <url>"), not as the RFC 9632 `geofeed` link a lookup would use; reading them would send every target address to a third-party RDAP service and fetch a URL its owner chose, for evidence that most targets do not have.
+  cross-check, but it never feeds the estimate. Geofeeds (RFC 8805) are read only from the feeds an administrator lists: finding them for every address would send each target to a third-party RDAP service (of six well-known networks only Cloudflare publishes one, and only as free text in an ARIN remark), and finding them in bulk means about 340 MB of registry data for a few thousand feeds, so the discovery is left to the administrator.
 * A task is sent again (once, `task_retries`) only when its backend instance died and the node had
   produced nothing yet. Once a node has produced samples a crash means `interrupted` with the
   partial results kept, because starting over would discard them. A node that drops is never
@@ -370,6 +404,7 @@ first because the application release pins it.
 
 | Release | Database head | Notes |
 |---|---|---|
+| v0.7.0 | `0010` | DNS over HTTPS to Quad9 (over HTTP/2, so only to nodes of v0.7.0 or newer); geofeeds (RFC 8805) from the feeds an administrator lists, shown next to the GeoIP place and checked the same way (`ipping-backend geofeed-update`) |
 | v0.6.1 | `0010` | fix: a node older than v0.6.0 is no longer asked for DNS over HTTPS or QUIC, which it answered the plain way without saying so |
 | v0.6.0 | `0010` | community nodes (a tier per node and token, left out unless asked for, rate limited, kept out of location estimates until verified, a location audit); DNS over HTTPS and QUIC as transports of the DNS and certificate checks |
 | v0.5.1 | `0009` | fix: a backend that was paused (a suspended machine or VM, a long stall, PostgreSQL being away) no longer drops its nodes' connections and leaves them offline |
@@ -419,8 +454,13 @@ What it does **not** do, so nobody assumes it:
 * **It does not stop a node from being used against its operator.** A node only runs the typed tasks the backend sends,
   against public addresses and allowed ports (the node's own policy), and the operator can narrow that further; but the
   backend, which the operator trusts, chooses the targets. Run a node only for a service you trust.
-* **Signed results and reputation are not built.** Signing would prove which node sent a result, not that it was true; a
-  reputation score needs history that does not exist yet.
+* **Signed results and reputation are not built, on purpose.** Signing would prove which node sent a result, not that it
+  was true, and the backend already knows which node sent it (the node's credential). A reputation needs ground truth to
+  score against, and the only ground truth here is the same nodes. A known-answer check against the backend's own address
+  would catch a node that does no work at all, and nothing more: a node that recognises the check passes it and lies about
+  the rest. Anything that sounded like verification would make a volunteer's numbers look more trustworthy than they are,
+  so the protection stays what it is: left out by default, labelled when in, rate limited, never in a watch, never in an
+  unverified location estimate.
 
 ## Roadmap
 
@@ -433,7 +473,7 @@ Small steps, each one committed and logged in [CHANGELOG.md](CHANGELOG.md).
 - [x] Dockerfile, CI (lint, types, tests, contract-drift check) and Docker Hub publishing
 - [x] API tests also run on PostgreSQL
 - [x] Release workflow: tag or manual run, dry run, version check, image + wheel + lock + contracts
-- [x] Tagged releases: v0.1.0, v0.2.0, v0.3.0, v0.4.0, v0.4.1, v0.5.0, v0.5.1, v0.6.0, v0.6.1
+- [x] Tagged releases: v0.1.0, v0.2.0, v0.3.0, v0.4.0, v0.4.1, v0.5.0, v0.5.1, v0.6.0, v0.6.1, v0.7.0
 - [x] More than one backend process or host (shared presence, owner-sends dispatch, reaper)
 - [ ] Per-session / per-IP quota tuning from real traffic
 - [x] TCP, HTTP and traceroute (protocol, planning, validation, tests; node and frontend shipped in v0.3.0)
@@ -444,14 +484,14 @@ Small steps, each one committed and logged in [CHANGELOG.md](CHANGELOG.md).
 - [x] Community nodes, first slice: a tier per node and token, left out unless asked for, rate limited, kept out of location estimates until verified, a location audit (no signed results or reputation)
 - [x] Traceroute in rounds like `mtr` (loss and spread per hop)
 - [x] QUIC as a transport of the certificate check (an h3 handshake over UDP)
-- [x] DNS over HTTPS as a transport of the DNS check (cloudflare and google; quad9 needs HTTP/2)
+- [x] DNS over HTTPS as a transport of the DNS check (cloudflare, google and quad9; quad9 needs HTTP/2, so only nodes of v0.7.0 or newer are asked)
 - [x] Certificate checks (`tls`: a handshake with no request; expiry, issuer, names, trust; a watch can alert before it expires)
 - [x] The network and place of each router on a traced path (from the GeoIP databases; the route map is in the web interface)
 - [x] Every kind over IPv6 with global addresses and the real policy, in a network-namespace lab (node CI); see the node README for what that does and does not prove
 - [ ] Over the real public IPv6 internet (needs a host with IPv6 connectivity; neither the development machine nor CI runners have it)
 - [x] Estimated network location: constraint-based, evidence listed, explicit "insufficient evidence"
 - [x] Calibrate the location model against real targets of known location (RIPE Atlas anchors; held-out half reported)
-- [x] A GeoIP / ASN database as a checked second opinion (ruled out by the measurements, or consistent); geofeeds (RFC 8805) investigated and not built, see above
+- [x] A GeoIP / ASN database as a checked second opinion (ruled out by the measurements, or consistent), and geofeeds (RFC 8805) from the feeds an administrator lists, checked the same way
 
 ## License
 
