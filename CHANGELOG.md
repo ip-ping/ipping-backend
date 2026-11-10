@@ -16,7 +16,9 @@ have been. No database change (still `0012`); the model is now `multilateration-
   given; the field stays in the contract.
 - **Nodes that disagree** (`conflicting: true`): the estimate is made from the nearest node and, in order of round trip, every node
   that does not contradict one already taken, instead of refusing. It is never `strong`. Real unicast fleets never trigger it;
-  99% to 100% of the anycast fleets with 16 or more nodes do.
+  99% to 100% of the anycast fleets with 16 or more nodes do. Its accuracy is the table's figure for a closest node as far away
+  as the nodes disagree (at fibre speed), not for the nearest node, which would say 99% for an address that nodes 8,000 km apart
+  are both a few ms from: a cautious stand-in, said as such in `accuracy.basis`.
 - **A tie goes to the city nearest the nearest node** (a ring of equally good places around one node used to be settled by the order
   of the list), and a node with no city of 100,000 inside its limit falls back to the city nearest it.
 - **`accuracy`** on every estimate with a place: `percent` (1 to 99, never certainty) is the share of answers, on real targets of

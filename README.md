@@ -303,8 +303,11 @@ What this says, and does not:
   with 4 nodes 88%, with 2 nodes 50% (and a single node cannot disagree). The rest were fleets with
   nodes close together, which see one instance and cannot tell. Across the real unicast fleets of both
   halves the same check never fired falsely. The estimate for a disagreeing set is a place near the
-  nearest node and is never `strong`; its accuracy is the table's for that closest node, which assumes
-  one true place, so the real figure is lower and the answer says that.
+  nearest node and is never `strong`. Its accuracy is *not* the table's figure for the nearest node
+  (a node 2 ms away would say 99%, absurd when two nodes that close are 8,000 km apart): it is the
+  figure for a closest node as far away as the nodes disagree (their distance at fibre speed), a
+  deliberately cautious stand-in, because an address served from several places has no single truth to
+  measure against. The answer says so (`disagreement_km`'s worth, in `accuracy.basis`).
 * The 60 targets are anchors in data centres, mostly in well-connected places; a home connection, a
   mobile network or a CDN edge may behave differently. The random fleets are drawn from an anchor
   pool that is heavy in Europe and North America, and your own nodes will be spread differently: the

@@ -150,6 +150,12 @@ def test_two_far_apart_nodes_both_very_close_still_give_an_estimate_and_say_they
     assert any("anycast" in w for w in result.warnings) and any(
         "apart" in w for w in result.warnings
     )
+    # the nodes are 10,000 km apart, so one place cannot be near all of them, however close the nearest was
+    assert result.disagreement_km > 9000
+    agreeing = E.estimate(observations[:1])
+    assert agreeing.accuracy is not None and result.accuracy is not None
+    assert result.accuracy.headline_pct < agreeing.accuracy.headline_pct <= 99
+    assert result.accuracy.headline_pct <= 20
 
 
 def test_too_few_nodes_still_give_an_estimate_with_a_warning() -> None:

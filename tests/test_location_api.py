@@ -162,7 +162,12 @@ def test_contradictory_nodes_give_no_single_place(api: Api) -> None:
         assert result["status"] == "estimated" and result["likely"] is not None
         assert result["conflicting"] is True and result["strength"] == "low"
         assert any("Possible explanations include anycast" in w for w in result["warnings"])
-        assert "disagree" in result["accuracy"]["basis"]
+        assert (
+            "disagree" in result["accuracy"]["basis"] and "cautious" in result["accuracy"]["basis"]
+        )
+        assert (
+            result["accuracy"]["percent"] <= 20
+        )  # far lower than a node 2 ms away would otherwise say
     finally:
         close(nodes)
 

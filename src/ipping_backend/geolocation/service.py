@@ -164,8 +164,10 @@ def _accuracy_out(estimate: E.Estimate) -> AccuracyOut | None:
             f"this share was within {estimate.accuracy.headline_km:,} km. It is a rate for answers like this one, "
             "not a probability for this address."
             + (
-                " The nodes disagree here, so the address may be served from several places and the real "
-                "figure is lower."
+                f" The nodes disagree here by up to {round(estimate.disagreement_km):,} km, so the address "
+                "may be served from several places: the figure is the one for a closest node that far away, "
+                "a cautious stand-in (an address served from several places has no single truth to measure "
+                "against), and the real figure is lower."
                 if estimate.conflicting
                 else ""
             )

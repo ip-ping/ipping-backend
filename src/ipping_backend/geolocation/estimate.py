@@ -136,6 +136,7 @@ class Estimate:
     warnings: list[str] = field(default_factory=list)
     limitations: tuple[str, ...] = LIMITATIONS
     conflicting: bool = False
+    disagreement_km: float = 0.0  # how far apart the nodes that disagree are, at the most
     accuracy: Accuracy | None = None
 
 
@@ -167,14 +168,16 @@ def _place(city: City) -> Place:
     return Place(city.name, city.country, city.latitude, city.longitude)
 
 
-def _agreeing(evidence: list[Observation]) -> tuple[list[Observation], str | None]:
+def _agreeing(evidence: list[Observation]) -> tuple[list[Observation], str | None, float]:
     """The nearest node and, in order of round trip, every node that does not contradict one already taken.
 
     Two nodes contradict each other when they are further apart than any real path allows given how close
-    both say the target is. The second value says so for the first pair found (None: nobody disagreed).
+    both say the target is. The second value says so for the first pair found (None: nobody disagreed); the
+    third is the widest distance between a node left out and one taken that it contradicts (0: nobody).
     """
     taken: list[Observation] = []
     first_clash: str | None = None
+    widest = 0.0
     for obs in evidence:
         clash = next(
             (
@@ -187,13 +190,15 @@ def _agreeing(evidence: list[Observation]) -> tuple[list[Observation], str | Non
         )
         if clash is None:
             taken.append(obs)
-        elif first_clash is None:
+            continue
+        widest = max(widest, clash[1])
+        if first_clash is None:
             o, apart = clash
             first_clash = (
                 f"{o.name} ({o.rtt_ms:.1f} ms) and {obs.name} ({obs.rtt_ms:.1f} ms) are {apart:.0f} km "
                 "apart: no single place can be that close to both."
             )
-    return taken, first_clash
+    return taken, first_clash, widest
 
 
 def estimate(
@@ -217,9 +222,10 @@ def estimate(
         nearest, nearest.rtt_ms * KM_PER_RTT_MS_HARD, nearest.rtt_ms * KM_PER_RTT_MS_FIBRE
     )
     # Nodes that cannot all be right: go on with the ones that agree with the nearest, and say so.
-    evidence, clash = _agreeing(evidence)
+    evidence, clash, widest_km = _agreeing(evidence)
     if clash is not None:
         result.conflicting = True
+        result.disagreement_km = widest_km
         result.warnings.append(NO_SINGLE_LOCATION)
         result.warnings.append(clash)
 
@@ -343,7 +349,12 @@ def estimate(
     result.status = "estimated"
     result.likely = likely
     result.strength = strength
-    result.accuracy = accuracy_for(nearest.rtt_ms)
+    # Nodes that disagree: the address answers from places up to `disagreement_km` apart, so one place cannot be near all of
+    # its answers, however close the nearest node was. The figure is the one for a closest node that far away (fibre
+    # speed): a cautious stand-in, since an address served from several places has no single truth to measure against.
+    result.accuracy = accuracy_for(
+        max(nearest.rtt_ms, result.disagreement_km / KM_PER_RTT_MS_FIBRE)
+    )
     result.alternatives = alternatives
     result.summary = (
         f"Likely near {likely.name}, {likely.country}: the closest node, {nearest.name}, measured "
