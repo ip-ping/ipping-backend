@@ -2,6 +2,50 @@
 
 Progress log for `ipping-backend`, newest first. Each entry is one small, tested step.
 
+## v0.8.0 (2026-11-10)
+
+IP data: MaxMind GeoLite2 turned on from the admin page, a lookup API, and nodes filled in from their address. The database
+migrates to `0011` (`nodes.auto_fields`).
+
+### MaxMind, from the admin page
+- `GET/PUT /api/v1/admin/ip-data` and `POST /api/v1/admin/ip-data/update`: the **account ID and license key** (MaxMind's
+  current download service needs both, as Basic credentials; the old license-key-only URL no longer accepts new keys), which
+  editions (GeoLite2 City, Country, ASN), automatic updates and how often (6 to 168 hours, default 24), and "update now". The
+  key is write-only: it is accepted, stored and used, never returned, never in an audit event, an error or a log line. Or give
+  it in the environment (`IPPING_MAXMIND_ACCOUNT_ID`, `IPPING_MAXMIND_LICENSE_KEY`), which then wins.
+- `ipdata/maxmind.py` downloads `.../geoip/databases/<edition>/download?suffix=tar.gz` with Basic auth, follows MaxMind's
+  redirect **without** the credentials, checks the archive against MaxMind's published SHA-256 (`tar.gz.sha256`), takes only
+  `<edition>.mmdb` out of it (size-limited), opens it as a database of that edition that answers for 8.8.8.8, and replaces the old
+  file atomically. A 401/403, 404, 429 and a broken connection each become a plain message.
+- `ipdata/updater.py` runs in every process: a check is due `update_hours` after the last attempt (1 hour after a failure, 6
+  after a refused key or the daily limit), asks MaxMind with a free HEAD request whether anything newer exists (GeoLite2 allows
+  30 downloads a day), takes a file lock so one process per host downloads, and keeps `maxmind-status.json` in the GeoIP
+  directory so every process (and the page) shows the same result. Giving a key starts a download at once; a new database is in
+  use without a restart.
+- The GeoIP loader now finds files whatever the case of their name (`GeoLite2-City.mmdb` did not match `*city*`), prefers
+  MaxMind's own files to any other, and knows a Country database.
+
+### The lookup API
+- `GET /api/v1/ip/{address}` and `GET /api/v1/ip`: network, country, region, city, postal code, position and accuracy, time
+  zone, AS number and organisation, with the source, when the database was built and the attribution. A private or reserved
+  address says `public: false`; an unknown one `found: false`; text that is not an address is a 422; no database is a 503 that
+  says how to get one.
+- Settings on the admin page: on or off, who may use it (`api_key` by default: an API key or an administrator; `public`;
+  `admin`), and lookups a minute per client address (60; administrators are not limited).
+
+### Nodes filled in from their address
+- A node's country, region, city, latitude and longitude, provider and AS number are filled from the data for the address it
+  connects from, when it enrolls and when it connects, and when a database is replaced. **A field an administrator typed, or the
+  node reported when it enrolled, is never overwritten**; a field that was filled automatically follows the data; editing makes it
+  yours and clearing hands it back (`nodes.auto_fields`, shown on admin nodes as `auto_fields`). `location_verified` is never set
+  by it. `POST /api/v1/admin/nodes/{id}/autofill` fills one now; the whole thing can be turned off, and turning it on fills what
+  is empty.
+- 41 tests more: the download against a pretend MaxMind (checksum, redirect, bad archives, every status, no key in any message),
+  the updater (due times, no repeat downloads, one process per directory, a status file that survives), the page, the lookup and
+  its access modes and limit, and each rule of the auto-fill. 429 on SQLite and 441 on PostgreSQL.
+- Not tested against MaxMind itself (that needs an account): the endpoint, the `.sha256` file and the HEAD behaviour follow
+  MaxMind's published documentation.
+
 ## v0.7.0 (2026-11-10)
 
 DNS over HTTPS to Quad9, and geofeeds. No database change (head `0010`). Nodes need v0.7.0 for the first; the second is

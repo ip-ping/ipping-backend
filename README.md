@@ -8,7 +8,7 @@ This repository is the coordinator. It validates targets, schedules work onto no
 aggregates results, estimates where an address appears to be, and owns the contracts the other two
 repositories build against.
 
-Current release: **v0.7.0** (database migration head `0010`). Nodes of any earlier version keep
+Current release: **v0.8.0** (database migration head `0011`). Nodes of any earlier version keep
 working for ping; TCP, HTTP and traceroute need node v0.3.0 or newer, DNS checks need node v0.4.0, traceroute rounds and certificate checks need node v0.5.0, and DNS over HTTPS and QUIC need node v0.6.0 (DNS over HTTPS to quad9 needs v0.7.0, which speaks HTTP/2); a measurement that asks for either goes only to nodes that have it.
 
 | Repository | Role |
@@ -97,6 +97,8 @@ bring up the backend together with the frontend, database and reverse proxy.
 | `IPPING_PENDING_GRACE_S` | `5` | How long a task waits for a node that is not connected before it is given up on |
 | `IPPING_GEOIP_DIR` | unset | Directory of GeoIP / ASN databases (`.mmdb`); the newest `*city*.mmdb` and `*asn*.mmdb` in it are used. `ipping-backend geoip-update` fills it |
 | `IPPING_GEOIP_CITY_DB` / `IPPING_GEOIP_ASN_DB` | unset | Explicit paths to a city and an ASN database instead of a directory |
+| `IPPING_MAXMIND_ACCOUNT_ID` / `IPPING_MAXMIND_LICENSE_KEY` | unset | A MaxMind account ID and license key for the GeoLite2 downloads, instead of entering them in the admin page (the page then says they come from the environment and cannot be changed there) |
+| `IPPING_MAXMIND_BASE_URL` | `https://download.maxmind.com` | Where the GeoLite2 databases are downloaded from (a mirror); https only |
 | `IPPING_GEOFEED_URLS` | unset | Comma-separated https addresses of geofeeds (RFC 8805) for `ipping-backend geofeed-update` to fetch into `IPPING_GEOIP_DIR`; nothing is fetched until that command runs |
 | `FORWARDED_ALLOW_IPS` | `127.0.0.1` | Reverse proxies whose `X-Forwarded-*` headers are trusted |
 
@@ -118,12 +120,14 @@ Interactive docs are at `/api/docs`; the machine-readable contract is `contracts
 | `GET /api/v1/measurements/{id}` | the measurement with its tasks, samples (`http` or `hop` details) and summaries |
 | `GET /api/v1/measurements/{id}/events` | live Server-Sent Events, resumable with `Last-Event-ID` |
 | `GET /api/v1/measurements/{id}/location` | the estimated location (ping and TCP) |
+| `GET /api/v1/ip`, `GET /api/v1/ip/{address}` | what the IP databases say about the caller's address, or any address: network, country, region, city, position, time zone, AS number and organisation (who may use it, and how often, is a setting; see "IP data") |
 | `GET /api/v1/measurements/{id}/path` | a traceroute's routers by address: network (ASN) and place from the GeoIP databases, if loaded (a hint to check against the round-trip time) |
 | `POST /api/v1/measurements/{id}/cancel`, `.../share` | cancel; make the link public |
 | `GET /api/v1/nodes` | the approved nodes, whether each is online, and the kinds it can run |
 | `POST /api/v1/nodes/enroll`, `WS /api/v1/nodes/connect` | what a node uses |
 | `/api/v1/admin/...` | nodes (approve, revoke, rotate credential), enrollment tokens, settings, audit, status |
 | `GET /api/v1/text?target=...` | with an API key: start a measurement, wait, and get the result as plain text (for `curl` and the command-line client) |
+| `/api/v1/admin/ip-data` | the MaxMind account (the key is never sent back), the databases in use, and the lookup API's settings: `GET`, `PUT`, and `POST .../update` to download now |
 | `/api/v1/admin/api-keys/...` | API keys for scripts: create (shown once), change quotas, revoke |
 | `/api/v1/admin/watches/...` | scheduled checks and alerts: list, create, change, delete, `run`, `test-alert`, `runs` (see below) |
 | `GET /api/v1/health/live`, `/ready` | liveness and readiness |
@@ -295,6 +299,55 @@ server started, and a newer file each month, are picked up without a restart, an
 request. DB-IP Lite is licensed CC BY 4.0 and the result
 carries the attribution it asks for.
 
+### IP data: MaxMind GeoLite2 from the admin page
+
+The simplest source of IP data is a free MaxMind account. Sign up for **GeoLite2** at maxmind.com, make a license key
+(Manage license keys), and in the admin page open **IP data** and enter the **account ID** (the number) and the **license
+key**. The backend then downloads GeoLite2 City and ASN (Country can be added) and keeps them up to date by itself:
+
+* It needs a directory to keep them in (`IPPING_GEOIP_DIR`: set in the container image, and by `ipping.sh` for a direct
+  install). The databases are `GeoLite2-City.mmdb` and so on, and are used in preference to any other file there
+  (`geoip-update`'s DB-IP Lite files stay as a fallback).
+* A check is made every `maxmind_update_hours` (default 24, from 6 to 168), set on the page, and after a new key is given.
+  MaxMind publishes City and Country on Tuesdays and Fridays and ASN on weekdays, and allows 30 downloads a day, so a check
+  first asks (a free HEAD request) whether anything newer is published and downloads only if so. "Update now" skips the
+  question. A failure is tried again after an hour; a refused key or the daily limit after six, and the page says which.
+* Each download is checked: the archive's SHA-256 must match the one MaxMind publishes, only `<edition>.mmdb` is taken out
+  of it, and it must open as a database of that edition and answer a lookup before it replaces the old file (an atomic
+  rename). The credentials go to MaxMind only (never along its redirect to storage), over https, and are never in an error
+  message or a log line. With several backend processes on one host, one downloads (a lock in the directory) and the status
+  file there tells the others.
+* **The license key is write-only**: the API takes it and never returns it (only whether one is saved), and an audit event
+  says that credentials changed, not what they are. It is stored in the database (`app_settings`) like the other settings,
+  not encrypted, so protect the database, or give it in the environment instead.
+
+GeoLite2 needs the attribution MaxMind's license asks for, which results and the lookup API carry, and its license does not
+let you hand out the databases themselves: this serves single lookups, limited as below, not the files.
+
+**The lookup API.** `GET /api/v1/ip/{address}` (and `GET /api/v1/ip` for the caller's own address, which is the real
+visitor's behind a proxy that is set up as the installer does) answers:
+
+```json
+{"address": "93.184.216.34", "version": 4, "public": true, "found": true, "network": "93.184.216.0/24",
+ "country": "DE", "country_name": "Germany", "continent": "EU", "region": "Hesse", "region_code": "HE",
+ "city": "Frankfurt am Main", "postal_code": "60313", "latitude": 50.11, "longitude": 8.68,
+ "accuracy_radius_km": 20, "time_zone": "Europe/Berlin", "asn": 15133, "organization": "Edgecast",
+ "source": "MaxMind GeoLite2", "database_built": "2026-11-10T00:00:00Z", "attribution": "This product includes GeoLite2 ..."}
+```
+
+A private or reserved address is answered with `public: false` and nothing looked up; an address the databases do not know
+with `found: false`; text that is not an address is a 422; with no database installed, a 503 that says how to get one. The
+admin page sets whether it is **on**, **who may use it** (an API key or an administrator's session by default, or anyone, or
+administrators only) and **how many lookups a minute** one client address may make (60 by default; administrators are not
+limited). The API keys are the ones for scripts (see above).
+
+**Nodes are filled in from their address.** A node's country, region, city, position, provider and AS number come from the
+data for the address it connects from, with one rule: a field an administrator typed (or the node reported when it enrolled)
+is never overwritten. A field that was filled automatically follows the data (a new database, a new address); editing a
+field makes it yours, and clearing it hands it back. A position taken from the data is a city's, so `location_verified` is
+never set by it. Admin nodes carry `auto_fields` (which fields are automatic), and `POST /api/v1/admin/nodes/{id}/autofill`
+fills one now. The whole thing can be switched off on the page, and turning it on fills what is empty at once.
+
 ### Geofeeds as another claim (optional, opt-in)
 
 A geofeed (RFC 8805) is a CSV a network publishes at a URL of its choosing: `prefix,country,region,city,postal`. It is
@@ -404,6 +457,7 @@ first because the application release pins it.
 
 | Release | Database head | Notes |
 |---|---|---|
+| v0.8.0 | `0011` | IP data: MaxMind GeoLite2 downloaded and kept up to date from the admin page, `GET /api/v1/ip`, and nodes filled in from their address (migration `0011` adds `nodes.auto_fields`) |
 | v0.7.0 | `0010` | DNS over HTTPS to Quad9 (over HTTP/2, so only to nodes of v0.7.0 or newer); geofeeds (RFC 8805) from the feeds an administrator lists, shown next to the GeoIP place and checked the same way (`ipping-backend geofeed-update`) |
 | v0.6.1 | `0010` | fix: a node older than v0.6.0 is no longer asked for DNS over HTTPS or QUIC, which it answered the plain way without saying so |
 | v0.6.0 | `0010` | community nodes (a tier per node and token, left out unless asked for, rate limited, kept out of location estimates until verified, a location audit); DNS over HTTPS and QUIC as transports of the DNS and certificate checks |
@@ -491,6 +545,7 @@ Small steps, each one committed and logged in [CHANGELOG.md](CHANGELOG.md).
 - [ ] Over the real public IPv6 internet (needs a host with IPv6 connectivity; neither the development machine nor CI runners have it)
 - [x] Estimated network location: constraint-based, evidence listed, explicit "insufficient evidence"
 - [x] Calibrate the location model against real targets of known location (RIPE Atlas anchors; held-out half reported)
+- [x] MaxMind GeoLite2 from the admin page (account ID and license key, downloaded, checked, kept up to date), a lookup API at `/api/v1/ip` with settings, and nodes filled in from their address
 - [x] A GeoIP / ASN database as a checked second opinion (ruled out by the measurements, or consistent), and geofeeds (RFC 8805) from the feeds an administrator lists, checked the same way
 
 ## License
