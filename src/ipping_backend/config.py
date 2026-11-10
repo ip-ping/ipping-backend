@@ -35,6 +35,11 @@ class Settings(BaseSettings):
     geoip_dir: str | None = None
     geoip_city_db: str | None = None
     geoip_asn_db: str | None = None
+    # MaxMind GeoLite2: the account ID and license key can be given here instead of in the admin page (the page then
+    # says they come from the environment). `maxmind_base_url` is where the databases are downloaded from (a mirror).
+    maxmind_account_id: str | None = None
+    maxmind_license_key: str | None = None
+    maxmind_base_url: str = "https://download.maxmind.com"
     # Geofeeds (RFC 8805) of networks, as a comma-separated list of https URLs. Nothing is fetched until
     # `ipping-backend geofeed-update` runs, and the result is kept in the GeoIP directory.
     geofeed_urls: str | None = None

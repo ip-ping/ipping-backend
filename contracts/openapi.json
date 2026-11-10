@@ -14,6 +14,14 @@
             ],
             "title": "Asn"
           },
+          "auto_fields": {
+            "description": "The fields filled in automatically from the node's address; the others were typed or reported",
+            "items": {
+              "type": "string"
+            },
+            "title": "Auto Fields",
+            "type": "array"
+          },
           "city": {
             "anyOf": [
               {
@@ -225,6 +233,7 @@
           "provider",
           "asn",
           "location_verified",
+          "auto_fields",
           "tier",
           "location_audit",
           "version",
@@ -817,6 +826,110 @@
           }
         },
         "title": "CreateTokenRequest",
+        "type": "object"
+      },
+      "DatabaseOut": {
+        "properties": {
+          "built": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "When MaxMind built the database",
+            "title": "Built"
+          },
+          "checked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checked At"
+          },
+          "downloaded_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Downloaded At"
+          },
+          "edition": {
+            "enum": [
+              "GeoLite2-City",
+              "GeoLite2-Country",
+              "GeoLite2-ASN"
+            ],
+            "title": "Edition",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "file": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File"
+          },
+          "present": {
+            "title": "Present",
+            "type": "boolean"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type"
+          }
+        },
+        "required": [
+          "edition",
+          "present"
+        ],
+        "title": "DatabaseOut",
         "type": "object"
       },
       "DnsAnswerRecord": {
@@ -1572,6 +1685,416 @@
         "title": "HttpDetail",
         "type": "object"
       },
+      "IpDataOut": {
+        "properties": {
+          "attribution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attribution"
+          },
+          "databases_loaded": {
+            "description": "Whether any IP database is in use, from MaxMind or another source",
+            "title": "Databases Loaded",
+            "type": "boolean"
+          },
+          "lookup": {
+            "$ref": "#/components/schemas/LookupSettingsOut"
+          },
+          "maxmind": {
+            "$ref": "#/components/schemas/MaxMindOut"
+          },
+          "node_autofill": {
+            "title": "Node Autofill",
+            "type": "boolean"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source"
+          }
+        },
+        "required": [
+          "maxmind",
+          "lookup",
+          "node_autofill",
+          "databases_loaded"
+        ],
+        "title": "IpDataOut",
+        "type": "object"
+      },
+      "IpDataUpdate": {
+        "description": "Every field optional: only the ones that are sent change.",
+        "properties": {
+          "account_id": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Account Id"
+          },
+          "clear_credentials": {
+            "default": false,
+            "title": "Clear Credentials",
+            "type": "boolean"
+          },
+          "license_key": {
+            "anyOf": [
+              {
+                "maxLength": 128,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "License Key"
+          },
+          "lookup_access": {
+            "anyOf": [
+              {
+                "enum": [
+                  "public",
+                  "api_key",
+                  "admin"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lookup Access"
+          },
+          "lookup_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lookup Enabled"
+          },
+          "lookup_per_minute": {
+            "anyOf": [
+              {
+                "maximum": 6000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lookup Per Minute"
+          },
+          "maxmind_auto_update": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maxmind Auto Update"
+          },
+          "maxmind_editions": {
+            "anyOf": [
+              {
+                "items": {
+                  "enum": [
+                    "GeoLite2-City",
+                    "GeoLite2-Country",
+                    "GeoLite2-ASN"
+                  ],
+                  "type": "string"
+                },
+                "maxItems": 3,
+                "minItems": 1,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maxmind Editions"
+          },
+          "maxmind_update_hours": {
+            "anyOf": [
+              {
+                "maximum": 168.0,
+                "minimum": 6.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Maxmind Update Hours"
+          },
+          "node_autofill": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Node Autofill"
+          }
+        },
+        "title": "IpDataUpdate",
+        "type": "object"
+      },
+      "IpInfoOut": {
+        "description": "What the IP databases say about an address.",
+        "properties": {
+          "accuracy_radius_km": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How far from the point the address may be",
+            "title": "Accuracy Radius Km"
+          },
+          "address": {
+            "title": "Address",
+            "type": "string"
+          },
+          "asn": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Asn"
+          },
+          "attribution": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Attribution"
+          },
+          "city": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "City"
+          },
+          "continent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Continent code",
+            "title": "Continent"
+          },
+          "country": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ISO 3166-1 alpha-2",
+            "title": "Country"
+          },
+          "country_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country Name"
+          },
+          "database_built": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Database Built"
+          },
+          "found": {
+            "description": "Whether the databases know anything about this address",
+            "title": "Found",
+            "type": "boolean"
+          },
+          "latitude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latitude"
+          },
+          "longitude": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Longitude"
+          },
+          "network": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The network the databases' record covers",
+            "title": "Network"
+          },
+          "organization": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Who the AS number belongs to",
+            "title": "Organization"
+          },
+          "postal_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Postal Code"
+          },
+          "public": {
+            "description": "False for a private, reserved or otherwise non-routable address: nothing is looked up",
+            "title": "Public",
+            "type": "boolean"
+          },
+          "region": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region"
+          },
+          "region_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Region Code"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Which databases answered",
+            "title": "Source"
+          },
+          "time_zone": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Time Zone"
+          },
+          "version": {
+            "enum": [
+              4,
+              6
+            ],
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "address",
+          "version",
+          "public",
+          "found"
+        ],
+        "title": "IpInfoOut",
+        "type": "object"
+      },
       "LocationEstimateOut": {
         "properties": {
           "alternatives": {
@@ -1740,6 +2263,155 @@
           "password"
         ],
         "title": "LoginRequest",
+        "type": "object"
+      },
+      "LookupSettingsOut": {
+        "properties": {
+          "access": {
+            "enum": [
+              "public",
+              "api_key",
+              "admin"
+            ],
+            "title": "Access",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "per_minute": {
+            "title": "Per Minute",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "enabled",
+          "access",
+          "per_minute"
+        ],
+        "title": "LookupSettingsOut",
+        "type": "object"
+      },
+      "MaxMindOut": {
+        "properties": {
+          "account_id": {
+            "title": "Account Id",
+            "type": "string"
+          },
+          "auto_update": {
+            "title": "Auto Update",
+            "type": "boolean"
+          },
+          "credentials_source": {
+            "enum": [
+              "admin",
+              "environment",
+              "none"
+            ],
+            "title": "Credentials Source",
+            "type": "string"
+          },
+          "databases": {
+            "items": {
+              "$ref": "#/components/schemas/DatabaseOut"
+            },
+            "title": "Databases",
+            "type": "array"
+          },
+          "directory_configured": {
+            "description": "Whether the backend has a directory to keep the databases in",
+            "title": "Directory Configured",
+            "type": "boolean"
+          },
+          "editions": {
+            "items": {
+              "enum": [
+                "GeoLite2-City",
+                "GeoLite2-Country",
+                "GeoLite2-ASN"
+              ],
+              "type": "string"
+            },
+            "title": "Editions",
+            "type": "array"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StatusErrorOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "last_attempt": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Attempt"
+          },
+          "last_success": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Success"
+          },
+          "license_key_set": {
+            "description": "Whether a license key is saved. The key itself is never sent back.",
+            "title": "License Key Set",
+            "type": "boolean"
+          },
+          "next_check": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Check"
+          },
+          "running": {
+            "title": "Running",
+            "type": "boolean"
+          },
+          "update_hours": {
+            "title": "Update Hours",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "account_id",
+          "license_key_set",
+          "credentials_source",
+          "editions",
+          "auto_update",
+          "update_hours",
+          "directory_configured",
+          "running",
+          "last_attempt",
+          "last_success",
+          "next_check",
+          "error",
+          "databases"
+        ],
+        "title": "MaxMindOut",
         "type": "object"
       },
       "MeasurementOptions": {
@@ -3181,6 +3853,24 @@
           "shared"
         ],
         "title": "ShareRequest",
+        "type": "object"
+      },
+      "StatusErrorOut": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "StatusErrorOut",
         "type": "object"
       },
       "Summary": {
@@ -4945,6 +5635,90 @@
         ]
       }
     },
+    "/api/v1/admin/ip-data": {
+      "get": {
+        "description": "The MaxMind account (never the key), the databases in use, and the settings of the lookup API.",
+        "operationId": "get_ip_data_api_v1_admin_ip_data_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpDataOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Ip Data",
+        "tags": [
+          "admin"
+        ]
+      },
+      "put": {
+        "description": "Change any of the settings. Only what is sent changes. A license key that is sent replaces the saved one.",
+        "operationId": "put_ip_data_api_v1_admin_ip_data_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/IpDataUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpDataOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Ip Data",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/ip-data/update": {
+      "post": {
+        "description": "Download the databases now (it runs in the background: ask again to see how it went).",
+        "operationId": "update_now_api_v1_admin_ip_data_update_post",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpDataOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Update Now",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/api/v1/admin/login": {
       "post": {
         "operationId": "login_api_v1_admin_login_post",
@@ -5178,6 +5952,49 @@
           }
         },
         "summary": "Audit Node Location",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/api/v1/admin/nodes/{node_id}/autofill": {
+      "post": {
+        "description": "Fill the node's empty fields, and refresh the automatic ones, from the address it connects from.\n\nFields an administrator typed (or the node reported) are not touched. It works whether or not auto-fill is on.",
+        "operationId": "autofill_node_api_v1_admin_nodes__node_id__autofill_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "node_id",
+            "required": true,
+            "schema": {
+              "title": "Node Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminNode"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Autofill Node",
         "tags": [
           "admin"
         ]
@@ -5726,6 +6543,71 @@
         "summary": "Ready",
         "tags": [
           "health"
+        ]
+      }
+    },
+    "/api/v1/ip": {
+      "get": {
+        "description": "What the databases say about the address this request comes from.",
+        "operationId": "my_address_api_v1_ip_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpInfoOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "My Address",
+        "tags": [
+          "ip"
+        ]
+      }
+    },
+    "/api/v1/ip/{address}": {
+      "get": {
+        "description": "What the databases say about an IPv4 or IPv6 address: its network, place, time zone and AS.",
+        "operationId": "address_info_api_v1_ip__address__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "address",
+            "required": true,
+            "schema": {
+              "title": "Address",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IpInfoOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Address Info",
+        "tags": [
+          "ip"
         ]
       }
     },

@@ -128,6 +128,10 @@ class Node(Base):
     longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     provider: Mapped[str | None] = mapped_column(String(100), nullable=True)
     asn: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # Which of country, region, city, latitude, longitude, provider and asn were filled in automatically from the
+    # address the node connects from (see `nodes/autofill.py`). Those are refreshed with the data; the others were
+    # typed by an administrator or reported by the node, and are left alone.
+    auto_fields: Mapped[list[str]] = mapped_column(JSON, default=list, server_default="[]")
     # Set by an administrator after checking the node's declared location.
     location_verified: Mapped[bool] = mapped_column(Boolean, default=False)
     # official | community. Community nodes are run by volunteers: they are left out of a measurement

@@ -17,6 +17,7 @@ from ..models import AuditEvent, EnrollmentToken, Node, new_id, utcnow
 from ..security.ratelimit import allow
 from ..security.tokens import hash_secret, new_secret, secrets_match
 from . import protocol as proto
+from .autofill import fill_if_enabled
 from .registry import NodeConnection
 
 log = logging.getLogger(__name__)
@@ -92,24 +93,25 @@ async def enroll(body: EnrollRequest, request: Request, db: Db) -> EnrollRespons
         raise ApiError(403, "invalid_token", "The enrollment token is invalid, used or expired.")
 
     secret = new_secret()
-    db.add(
-        Node(
-            id=node_id,
-            name=body.name,
-            status="pending",
-            credential_hash=hash_secret(secret),
-            country=body.country.upper() if body.country else None,
-            region=body.region,
-            city=body.city,
-            latitude=body.latitude,
-            longitude=body.longitude,
-            provider=body.provider,
-            asn=body.asn,
-            version=body.version,
-            remote_addr=ip,
-            tier=token.tier,
-        )
+    node = Node(
+        id=node_id,
+        name=body.name,
+        status="pending",
+        credential_hash=hash_secret(secret),
+        country=body.country.upper() if body.country else None,
+        region=body.region,
+        city=body.city,
+        latitude=body.latitude,
+        longitude=body.longitude,
+        provider=body.provider,
+        asn=body.asn,
+        version=body.version,
+        remote_addr=ip,
+        tier=token.tier,
     )
+    db.add(node)
+    # what the node did not say about itself is filled in from the address it came from (see nodes/autofill.py)
+    await fill_if_enabled(db, node, request.app.state.geoip)
     db.add(
         AuditEvent(
             actor=f"node:{node_id}",
@@ -239,6 +241,7 @@ async def connect(websocket: WebSocket) -> None:
             row.capabilities = hello.capabilities.model_dump()
             row.last_seen_at = utcnow()
             row.remote_addr = websocket.client.host if websocket.client else None
+            await fill_if_enabled(db, row, state.geoip)
             node_status = row.status
             await db.commit()
         else:

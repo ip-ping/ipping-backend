@@ -24,12 +24,16 @@ from .errors import install_error_handlers
 from .geolocation.geofeed import FILE_NAME as GEOFEED_FILE
 from .geolocation.geofeed import Geofeeds
 from .geolocation.geoip import GeoIp
+from .ipdata import admin as ipdata_admin
+from .ipdata import router as ipdata_router
+from .ipdata.updater import MaxMindUpdater
 from .logging_config import configure_logging
 from .measurements import router as measurements_router
 from .measurements import text as text_router
 from .measurements.engine import MeasurementEngine
 from .models import AppSetting, Base, User
 from .nodes import router as nodes_router
+from .nodes.autofill import refresh_all
 from .nodes.registry import NodeRegistry
 from .security.targets import Resolver, system_resolver
 from .watches import router as watches_router
@@ -122,6 +126,14 @@ def create_app(
             Path(settings.geoip_dir) / GEOFEED_FILE if settings.geoip_dir else None
         )
 
+        async def refresh_nodes() -> None:
+            await refresh_all(sessionmaker, app.state.geoip)
+
+        # The MaxMind databases an administrator turned on, kept up to date (see ipdata/)
+        app.state.maxmind = MaxMindUpdater(
+            sessionmaker, settings, app.state.geoip, on_updated=refresh_nodes
+        )
+
         if create_schema:
             async with db_engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
@@ -141,6 +153,7 @@ def create_app(
         ]
         loops.append(asyncio.create_task(maintenance.loop(sessionmaker), name="maintenance"))
         loops.append(asyncio.create_task(scheduler.run(), name="watches"))
+        loops.append(asyncio.create_task(app.state.maxmind.run(), name="maxmind"))
         app.state.loops = loops  # tests stop these to simulate a process that is simply gone
         try:
             yield
@@ -167,6 +180,8 @@ def create_app(
     app.include_router(api_keys_router.router)
     app.include_router(nodes_router.router)
     app.include_router(measurements_router.router)
+    app.include_router(ipdata_admin.router)
+    app.include_router(ipdata_router.router)
     app.include_router(text_router.router)
 
     @app.get("/api/v1/health/live", tags=["health"])

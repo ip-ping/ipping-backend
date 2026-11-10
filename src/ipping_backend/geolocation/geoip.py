@@ -74,14 +74,40 @@ class _Database:
         self._stamp: tuple[int, int] | None = None
 
     def get(self, ip: str) -> dict[str, Any] | None:
+        return self.get_with_prefix(ip)[0]
+
+    def get_with_prefix(self, ip: str) -> tuple[dict[str, Any] | None, int | None]:
+        """The record for the address, and the length of the network it covers (in the address's own family)."""
+        reader = self._current()
+        if reader is None:
+            return None, None
+        try:
+            record, prefix = reader.get_with_prefix_len(ip)
+        except (ValueError, maxminddb.InvalidDatabaseError):
+            return None, None
+        if not isinstance(record, dict):
+            return None, None
+        # an IPv4 address in an IPv6 tree reports its prefix counted from the start of the 128 bits
+        if "." in ip and prefix > 32:
+            prefix -= 96
+        return record, prefix
+
+    def info(self) -> dict[str, Any] | None:
+        """What the file says about itself: its type, when it was built, its size."""
         reader = self._current()
         if reader is None:
             return None
+        meta = reader.metadata()
         try:
-            record = reader.get(ip)
-        except (ValueError, maxminddb.InvalidDatabaseError):
-            return None
-        return record if isinstance(record, dict) else None
+            size = self.path.stat().st_size
+        except OSError:
+            size = 0
+        return {
+            "file": self.path.name,
+            "type": meta.database_type,
+            "build_epoch": meta.build_epoch,
+            "size": size,
+        }
 
     def _current(self) -> maxminddb.Reader | None:
         try:
@@ -110,9 +136,10 @@ class _Database:
 class GeoIp:
     """The configured databases (either, both or neither).
 
-    With a directory, the newest `*city*.mmdb` and `*asn*.mmdb` in it are used, and the directory is looked at
-    again from time to time: a first download after the server started is found without a restart, and so is a
-    newer file. An explicit path is fixed.
+    With a directory, the files in it whose name has `city`, `asn` or `country` in it (any case) are used, MaxMind's own
+    (GeoLite2-City.mmdb) before others and then the newest, and the directory is looked at again from time to time: a
+    first download after the server started is found without a restart, and so is a newer file. An explicit path is
+    fixed.
     """
 
     def __init__(
@@ -125,13 +152,13 @@ class GeoIp:
     ) -> None:
         self._dir = directory
         self._scan_every_s = scan_every_s
-        self._patterns = {"city": "*city*.mmdb", "asn": "*asn*.mmdb"}
         self._fixed: dict[str, _Database | None] = {
             "city": _Database(city) if city else None,
             "asn": _Database(asn) if asn else None,
+            "country": None,
         }
-        self._found: dict[str, _Database | None] = {"city": None, "asn": None}
-        self._next_scan = {"city": 0.0, "asn": 0.0}
+        self._found: dict[str, _Database | None] = {"city": None, "asn": None, "country": None}
+        self._next_scan = {"city": 0.0, "asn": 0.0, "country": 0.0}
         self._lock = threading.Lock()
 
     @classmethod
@@ -143,6 +170,29 @@ class GeoIp:
             directory=Path(directory) if directory else None,
         )
 
+    def _best(self, kind: str) -> Path | None:
+        """The file to use for this kind: MaxMind's own (GeoLite2, GeoIP2) before any other, then the newest."""
+        assert self._dir is not None  # noqa: S101
+        best: tuple[bool, float] | None = None
+        chosen: Path | None = None
+        for path in self._dir.iterdir():
+            name = path.name.lower()
+            if not name.endswith(".mmdb") or kind not in name:
+                continue
+            try:
+                rank = (name.startswith(("geolite2", "geoip2")), path.stat().st_mtime)
+            except OSError:
+                continue
+            if best is None or rank > best:
+                best, chosen = rank, path
+        return chosen
+
+    def rescan(self) -> None:
+        """Look at the directory again at the next lookup (a download has just replaced a file)."""
+        with self._lock:
+            for kind in self._next_scan:
+                self._next_scan[kind] = 0.0
+
     def _database(self, kind: str) -> _Database | None:
         fixed = self._fixed[kind]
         if fixed is not None or self._dir is None:
@@ -152,18 +202,34 @@ class GeoIp:
             if now >= self._next_scan[kind]:
                 self._next_scan[kind] = now + self._scan_every_s
                 try:
-                    found = sorted(
-                        self._dir.glob(self._patterns[kind]), key=lambda p: p.stat().st_mtime
-                    )
+                    newest = self._best(kind)
                 except OSError:
-                    found = []
-                newest = found[-1] if found else None
+                    newest = None
                 current = self._found[kind]
                 if newest is None:
                     self._found[kind] = None
                 elif current is None or current.path != newest:
                     self._found[kind] = _Database(newest)
             return self._found[kind]
+
+    @property
+    def _country(self) -> _Database | None:
+        return self._database("country")
+
+    def databases(self) -> list[dict[str, Any]]:
+        """The databases in use: which file, what it is, when it was built."""
+        found = []
+        for kind in ("city", "country", "asn"):
+            database = self._database(kind)
+            info = database.info() if database is not None else None
+            if info is not None:
+                found.append({"kind": kind, **info})
+        return found
+
+    def record(self, kind: str, ip: str) -> tuple[dict[str, Any] | None, int | None]:
+        """The raw record of the `city`, `country` or `asn` database for an address, with its network's prefix length."""
+        database = self._database(kind)
+        return database.get_with_prefix(ip) if database is not None else (None, None)
 
     @property
     def _city(self) -> _Database | None:

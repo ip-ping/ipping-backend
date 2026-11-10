@@ -26,6 +26,7 @@ from ..models import (
     utcnow,
 )
 from ..nodes.audit import Verifier, judge
+from ..nodes.autofill import AUTO_FIELDS, apply_edit, fill, fill_if_enabled
 from ..runtime_settings import (
     RuntimeSettings,
     RuntimeSettingsUpdate,
@@ -174,6 +175,9 @@ class AdminNode(BaseModel):
     provider: str | None
     asn: int | None
     location_verified: bool
+    auto_fields: list[str] = Field(
+        description="The fields filled in automatically from the node's address; the others were typed or reported"
+    )
     tier: Literal["official", "community"]
     location_audit: dict[str, Any] | None
     version: str | None
@@ -224,6 +228,7 @@ def _admin_node(node: Node, online: dict[str, OnlineNode]) -> AdminNode:
         provider=node.provider,
         asn=node.asn,
         location_verified=node.location_verified,
+        auto_fields=list(node.auto_fields or []),
         tier=node.tier,
         location_audit=node.location_audit,
         version=node.version,
@@ -259,9 +264,39 @@ async def update_node(
     changes = body.model_dump(exclude_unset=True)
     if "country" in changes and changes["country"]:
         changes["country"] = changes["country"].upper()
+    # What an administrator types is theirs; an empty value hands the field back to the IP data (see nodes/autofill.py).
+    edited = {k: changes.pop(k) for k in list(changes) if k in AUTO_FIELDS}
     for key, value in changes.items():
         setattr(node, key, value)
-    await _audit(db, admin, request, "node.updated", node_id, fields=sorted(changes))
+    handed_back = apply_edit(node, edited)
+    if handed_back:
+        await fill_if_enabled(db, node, request.app.state.geoip)
+    await _audit(
+        db,
+        admin,
+        request,
+        "node.updated",
+        node_id,
+        fields=sorted({*changes, *edited}),
+        automatic=handed_back,
+    )
+    await db.commit()
+    return _admin_node(node, await _online(request, db))
+
+
+@router.post("/nodes/{node_id}/autofill", response_model=AdminNode)
+async def autofill_node(node_id: str, request: Request, admin: AdminUser, db: Db) -> AdminNode:
+    """Fill the node's empty fields, and refresh the automatic ones, from the address it connects from.
+
+    Fields an administrator typed (or the node reported) are not touched. It works whether or not auto-fill is on.
+    """
+    node = await _get_node(db, node_id)
+    if not node.remote_addr:
+        raise ApiError(
+            409, "no_address", "The node has not connected yet, so there is no address to look up."
+        )
+    changed = fill(node, request.app.state.geoip)
+    await _audit(db, admin, request, "node.autofilled", node_id, fields=changed)
     await db.commit()
     return _admin_node(node, await _online(request, db))
 
