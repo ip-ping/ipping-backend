@@ -636,3 +636,110 @@ def test_fill_follows_the_data_only_for_fields_it_filled(api: Api, tmp_path: Pat
 
     first, second = api.client.portal.call(run)
     assert "country" in first and "asn" in first and second == []
+
+
+# ---------------------------------------------------------------------------------------------
+# The addresses a measurement tested, with what the databases say: part of the measurement, not of the lookup API
+# ---------------------------------------------------------------------------------------------
+
+
+def _answer_with(session: Any, address: str, rtt_us: int = 9_000) -> None:
+    import json
+
+    task = json.loads(session.receive_text())
+    ids = {"task_id": task["task_id"], "attempt_id": task["attempt_id"]}
+    session.send_text(json.dumps({"type": "task_ack", **ids}))
+    session.send_text(
+        json.dumps({"type": "sample", **ids, "seq": 0, "status": "ok", "rtt_us": rtt_us})
+    )
+    session.send_text(
+        json.dumps({"type": "task_result", **ids, "status": "completed", "tested_ip": address})
+    )
+    from .test_api import barrier
+
+    barrier(session)
+
+
+def test_a_measurement_says_what_the_databases_know_of_every_address_it_tested(
+    api: Api, tmp_path: Path
+) -> None:
+    from .test_api import connect
+
+    api.become_admin()
+    _geoip(api, tmp_path / "geoip")
+    # the lookup API itself is closed to everybody but administrators: the measurement's own addresses are not
+    assert api.request("PUT", ADMIN, json={"lookup_access": "admin"}).status_code == 200
+    sessions = []
+    for name in ("A", "B", "C"):
+        _, credential = api.enroll_node(name)
+        sessions.append(connect(api, credential))
+    try:
+        mid = api.post(
+            "/api/v1/measurements", {"target": "example.com", "dns_mode": "regional"}
+        ).json()["id"]
+        for (_, session), address in zip(sessions, [PUBLIC, PUBLIC, "93.184.216.35"], strict=True):
+            _answer_with(session, address)
+        stranger = Api(api.client)
+        owner = dict(api.client.cookies)
+        got = api.get(f"/api/v1/measurements/{mid}/addresses")
+        assert got.status_code == 200, got.text
+        body = got.json()
+        assert body["databases_loaded"] is True
+        assert [(a["address"], a["nodes"]) for a in body["addresses"]] == [
+            (PUBLIC, 2),
+            ("93.184.216.35", 1),
+        ]
+        first = body["addresses"][0]["info"]
+        assert first["city"] == "Frankfurt am Main" and first["country"] == "DE" and first["asn"]
+        # a stranger (no session of the owner) cannot read it, like the measurement; once shared, anyone can
+        api.client.cookies.clear()
+        stranger.start_session()
+        assert stranger.get(f"/api/v1/measurements/{mid}/addresses").status_code == 404
+        api.client.cookies.update(owner)
+        assert api.post(f"/api/v1/measurements/{mid}/share", {"shared": True}).status_code == 200
+        api.client.cookies.clear()
+        stranger.start_session()
+        shared = stranger.get(f"/api/v1/measurements/{mid}/addresses")
+        assert shared.status_code == 200 and shared.json()["addresses"][0]["info"]["asn"]
+        # while the standalone lookup stays closed to the same visitor
+        assert stranger.get(f"/api/v1/ip/{PUBLIC}").status_code in (401, 403)
+    finally:
+        for ws, _ in sessions:
+            ws.__exit__(None, None, None)
+
+
+def test_without_a_database_the_addresses_are_listed_and_say_so(api: Api) -> None:
+    from .test_api import connect
+
+    api.become_admin()
+    api.client.app.state.geoip = GeoIp()  # type: ignore[attr-defined]
+    _, credential = api.enroll_node("A")
+    ws, session = connect(api, credential)
+    try:
+        mid = api.post("/api/v1/measurements", {"target": PUBLIC}).json()["id"]
+        _answer_with(session, PUBLIC)
+        body = api.get(f"/api/v1/measurements/{mid}/addresses").json()
+        assert body["databases_loaded"] is False
+        assert body["addresses"] == [{"address": PUBLIC, "nodes": 1, "info": None}]
+    finally:
+        ws.__exit__(None, None, None)
+
+
+def test_a_private_address_a_node_reports_is_never_kept_so_never_listed(
+    api: Api, tmp_path: Path
+) -> None:
+    from .test_api import connect
+
+    api.become_admin()
+    _geoip(api, tmp_path / "geoip")
+    _, credential = api.enroll_node("A")
+    ws, session = connect(api, credential)
+    try:
+        mid = api.post(
+            "/api/v1/measurements", {"target": "example.com", "dns_mode": "regional"}
+        ).json()["id"]
+        _answer_with(session, "10.1.2.3")  # a node's report is never trusted to be public
+        body = api.get(f"/api/v1/measurements/{mid}/addresses").json()
+        assert body["databases_loaded"] is True and body["addresses"] == []
+    finally:
+        ws.__exit__(None, None, None)

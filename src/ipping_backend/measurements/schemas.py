@@ -8,6 +8,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
+from ..ipdata.schemas import IpInfoOut
 from ..nodes.protocol import DnsDetail, DnsRecordType, HopDetail, HttpDetail, ProbeKind, TlsDetail
 
 TASK_ACTIVE = ("pending", "dispatched", "running")
@@ -231,6 +232,21 @@ class MeasurementOut(BaseModel):
     last_event_seq: int
     stats: MeasurementStats
     tasks: list[TaskOut]
+
+
+class AddressInfoOut(BaseModel):
+    """One address the nodes tested, and what the IP databases say about it."""
+
+    address: str
+    nodes: int = Field(description="How many nodes tested this address")
+    info: IpInfoOut | None = Field(
+        default=None, description="Null when no IP database is installed"
+    )
+
+
+class MeasurementAddressesOut(BaseModel):
+    databases_loaded: bool = Field(description="Whether any IP database is in use on this site")
+    addresses: list[AddressInfoOut] = Field(description="The most tested address first; at most 50")
 
 
 class ShareRequest(BaseModel):

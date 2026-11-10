@@ -32,8 +32,17 @@ have been. No database change (still `0012`); the model is now `multilateration-
   the new model are in `calibration/` (`result-test-multilateration-5.txt`, `result-anycast-multilateration-5.txt`,
   `accuracy-fit-multilateration-5.txt`). The README section "Estimated network location" is rewritten around them.
 
+- **`GET /api/v1/measurements/{id}/addresses`**: what the IP databases say about each address the nodes tested (place, network, AS;
+  most tested first, at most 50, with the number of nodes), `databases_loaded` and a null `info` when no database is installed. It
+  belongs to the measurement: whoever may read the measurement may read it, whatever the lookup API's access setting says, because it
+  only ever covers the addresses that measurement tested (no free lookups). A private address a node reports is never kept, so
+  never listed. The web interface's measurement page uses it.
+- **The README says what the design now is**: a best guess, always given, rather than an answer held back until it is safe: what
+  that costs (85% of the answers are `low`, median 1,500 km) and what it buys, with the accuracy percentage as the reader's guide.
+
 ### Tests
-- Estimator tests for what used to be refusals (1 and 2 nodes, a node 140 ms away, nodes 3,600 km apart), for the figure's shape
+- Three tests for the addresses endpoint (an owner, a stranger and a shared link, with the lookup API closed to administrators
+  only; no database; a private report). Estimator tests for what used to be refusals (1 and 2 nodes, a node 140 ms away, nodes 3,600 km apart), for the figure's shape
   (never rising with the closest node's round trip, 1 to 99, headline equals the 500 km figure), and on the real data: no unicast
   fleet is flagged, every measurement gets an answer and a far one is `low`, the stated accuracy matches the held-out half, and 95%
   or more of the anycast fleets are flagged. API tests for `accuracy` and `conflicting`. 456 pass, ruff and mypy clean.

@@ -6,7 +6,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, Query, Request
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from ..deps import (
     CurrentSession,
@@ -22,7 +22,15 @@ from ..geolocation.geoip import valid_ip
 from ..geolocation.path import path_for
 from ..geolocation.schemas import LocationEstimateOut, PathOut
 from ..geolocation.service import UnknownAddress, location_for
-from ..models import ApiKey, Measurement, MeasurementEvent, User, WebSession
+from ..ipdata.lookup import lookup
+from ..models import (
+    ApiKey,
+    Measurement,
+    MeasurementEvent,
+    MeasurementTask,
+    User,
+    WebSession,
+)
 from . import schemas
 from .engine import Owner
 
@@ -155,6 +163,52 @@ async def estimated_location(
         )
     except UnknownAddress:
         raise ApiError(404, "unknown_address", "No node measured that address.") from None
+
+
+MAX_ADDRESSES = 50
+
+
+@router.get("/{measurement_id}/addresses", response_model=schemas.MeasurementAddressesOut)
+async def tested_addresses(
+    measurement_id: str,
+    request: Request,
+    session: OptionalSession,
+    key: OptionalApiKey,
+    db: Db,
+) -> schemas.MeasurementAddressesOut:
+    """What the IP databases say about each address the nodes tested (place, network, AS), most tested first.
+
+    It belongs to the measurement: whoever may read the measurement may read this, whatever the IP lookup API's
+    own access setting says, because the addresses are the ones the measurement itself tested (a name each node
+    resolved for itself can be several) and nothing else can be asked for. `info` is null when no database is
+    installed.
+    """
+    await _authorized(db, measurement_id, session, key)
+    count = func.count()
+    rows = (
+        await db.execute(
+            select(MeasurementTask.tested_ip, count)
+            .where(
+                MeasurementTask.measurement_id == measurement_id,
+                MeasurementTask.tested_ip.is_not(None),
+            )
+            .group_by(MeasurementTask.tested_ip)
+            .order_by(count.desc(), MeasurementTask.tested_ip)
+            .limit(MAX_ADDRESSES)
+        )
+    ).all()
+    geoip = request.app.state.geoip
+    loaded = bool(geoip.databases())
+    addresses = []
+    for address, nodes in rows:
+        info = None
+        if loaded:
+            try:
+                info = lookup(geoip, address)
+            except ValueError:  # not an address: a node's report is never trusted to be one
+                info = None
+        addresses.append(schemas.AddressInfoOut(address=address, nodes=nodes, info=info))
+    return schemas.MeasurementAddressesOut(databases_loaded=loaded, addresses=addresses)
 
 
 @router.get("/{measurement_id}/path", response_model=PathOut)

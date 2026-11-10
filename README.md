@@ -119,7 +119,8 @@ Interactive docs are at `/api/docs`; the machine-readable contract is `contracts
 | `POST /api/v1/measurements` | start one: `{"target": "example.com:443", "kind": "tcp", "count": 4}`; `kind` is `ping`, `tcp`, `http`, `traceroute`, `dns` or `tls`; also `port` (tcp, http, tls), `record_type`, `resolver` and `transport` (dns), `follow_redirects`, `dns_mode` (`regional`, the default: each node resolves a hostname itself; or `fixed`, one address for every node) with `resolve_node_id` (the node that resolves it for the rest), `family`, `node_ids`, `countries` |
 | `GET /api/v1/measurements/{id}` | the measurement with its tasks, samples (`http` or `hop` details) and summaries |
 | `GET /api/v1/measurements/{id}/events` | live Server-Sent Events, resumable with `Last-Event-ID` |
-| `GET /api/v1/measurements/{id}/location` | the estimated location (ping and TCP) |
+| `GET /api/v1/measurements/{id}/location` | the best-guess location (ping and TCP) with its accuracy percentage |
+| `GET /api/v1/measurements/{id}/addresses` | what the IP databases say about each address the nodes tested (place, network, AS), most tested first; it belongs to the measurement, so whoever may read the measurement may read it, whatever the lookup API's access setting says |
 | `GET /api/v1/ip`, `GET /api/v1/ip/{address}` | what the IP databases say about the caller's address, or any address: network, country, region, city, position, time zone, AS number and organisation (who may use it, and how often, is a setting; see "IP data") |
 | `GET /api/v1/measurements/{id}/path` | a traceroute's routers by address: network (ASN) and place from the GeoIP databases, if loaded (a hint to check against the round-trip time) |
 | `POST /api/v1/measurements/{id}/cancel`, `.../share` | cancel; make the link public |
@@ -221,8 +222,12 @@ address, so turn following off (`max_redirects: 0`) if that matters on your depl
 
 ## Estimated network location (experimental)
 
-`GET /api/v1/measurements/{id}/location` says where the target address *appears* to be, from the
-smallest round-trip time each node measured and where those nodes are. Latency is not distance, so the
+`GET /api/v1/measurements/{id}/location` gives a **best guess** of where the target address is, from
+the smallest round-trip time each node measured and where those nodes are. **It is a guess, and it is
+meant to be one.** The design choice is to guess rather than to make sure: ipping always names its best
+place, even from one node or from nodes that disagree, and says how often guesses like it have been
+right instead of holding the answer back until it is safe. The reader decides how much to trust it, with
+the accuracy percentage, the evidence and the warnings in front of them. Latency is not distance, so the
 method is built around what it can and cannot know:
 
 1. **Hard limits.** A node that measured `r` ms heard from the target within `150 * r` km (light
@@ -230,15 +235,15 @@ method is built around what it can and cannot know:
    overlap, the nodes *disagree* (`conflicting: true`): "no single place fits all of them; possible
    explanations include anycast, routing differences, or unreliable observations". The estimate is
    then made from the nearest node and the nodes that agree with it, and the answer says so. It
-   never declares anycast on its own.
+   does not declare anycast on its own: that is for the reader to conclude.
 2. **Ranking.** The remaining cities (GeoNames, 3,399 cities of 100,000+ people, see `NOTICE`) are
    scored by how well the times fit an internet path, with the path-length factor (1.2 to 3 times the
    fibre distance) fitted per place; a tie goes to the city nearest the nearest node. Nodes with
    unverified coordinates count for less.
-3. **Always an answer, with its odds.** Whenever one node with a known position measured the address
+3. **Always a guess, with its odds.** Whenever one node with a known position measured the address
    there is an estimate, however thin the evidence: fewer than 3 nodes, a closest node over 40 ms
-   away, or nodes that disagree are *warnings*, not reasons to refuse (the only answer without a
-   place is a measurement that no node with a position took part in). The result lists its evidence,
+   away, or nodes that disagree are *warnings*, not reasons to hold it back (the only measurement
+   without a place is one that no node with a position took part in). The result lists its evidence,
    the other plausible regions, a strength label (`low`, `moderate`, `strong`) and an **accuracy**:
    `accuracy.percent` is the share of answers, on real targets of known position, that were within
    `accuracy.radius_km` (500) of the truth when the closest node was about as far away as it was here,
@@ -293,12 +298,15 @@ What this says, and does not:
   honest answer is "somewhere on that side of the world" and the accuracy says so (about 6% within
   500 km). Fewer nodes mostly mean a further closest node: the median over all answers is 3,350 km
   for 1 node, 1,320 km for 4, 630 km for 32 nodes (low answers).
-* The estimator used to decline in three cases: fewer than 3 nodes, a closest node over 40 ms, and
-  nodes that disagreed (36% of these random fleets got no answer). It now answers all of them and
-  leaves the judgement to the accuracy figure and the warnings. What that costs: answers in the low
-  label are now most of the answers and their median error is 1,500 km instead of 530 km, because the
-  fleets that were declined are in it. Answers with a closest node within 40 ms are unchanged.
-* **Anycast is flagged, not guessed.** Across 1,260 random fleets measuring seven anycast root
+* **Guessing instead of making sure is a trade, and this is its price.** The estimator used to decline in
+  three cases: fewer than 3 nodes, a closest node over 40 ms, and nodes that disagreed (36% of these
+  random fleets got no answer). It now guesses in all of them and leaves the judgement to the accuracy
+  figure and the warnings. What that costs: `low` answers are now most of the answers (85%) and their
+  median error is 1,500 km instead of 530 km, because the fleets that used to be declined are in it,
+  and a guess from one node 100 ms away is wrong by thousands of km most of the time (it says so: about
+  7% within 500 km). What it buys: there is always a place on the map, a crosshair and a number to
+  look at, and the answers that were already given (a closest node within 40 ms) are unchanged.
+* **Anycast is flagged, and still guessed at.** Across 1,260 random fleets measuring seven anycast root
   servers, 72% had nodes that disagree; with 16 or more nodes it was 417 of 420, with 8 nodes 97%,
   with 4 nodes 88%, with 2 nodes 50% (and a single node cannot disagree). The rest were fleets with
   nodes close together, which see one instance and cannot tell. Across the real unicast fleets of both
@@ -375,6 +383,12 @@ with `found: false`; text that is not an address is a 422; with no database inst
 admin page sets whether it is **on**, **who may use it** (an API key or an administrator's session by default, or anyone, or
 administrators only) and **how many lookups a minute** one client address may make (60 by default; administrators are not
 limited). The API keys are the ones for scripts (see above).
+
+**A measurement's own addresses.** `GET /api/v1/measurements/{id}/addresses` gives the same record for each address the nodes
+actually tested (a name each node resolved for itself can be several), most tested first, with how many nodes tested each. It is
+part of the measurement, so whoever may read the measurement may read it **whatever the lookup API's access setting says**: the
+addresses are the ones the measurement itself tested and nothing else can be asked for (no free lookups). The web interface shows
+it on every measurement page. `info` is null when no database is installed.
 
 **Nodes are filled in from their address.** A node's country, region, city, position, provider and AS number come from the
 data for the address it connects from, with one rule: a field an administrator typed (or the node reported when it enrolled)

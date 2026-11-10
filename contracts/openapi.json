@@ -62,6 +62,37 @@
         "title": "AddressGroupOut",
         "type": "object"
       },
+      "AddressInfoOut": {
+        "description": "One address the nodes tested, and what the IP databases say about it.",
+        "properties": {
+          "address": {
+            "title": "Address",
+            "type": "string"
+          },
+          "info": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IpInfoOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null when no IP database is installed"
+          },
+          "nodes": {
+            "description": "How many nodes tested this address",
+            "title": "Nodes",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "address",
+          "nodes"
+        ],
+        "title": "AddressInfoOut",
+        "type": "object"
+      },
       "AdminNode": {
         "properties": {
           "asn": {
@@ -2512,6 +2543,29 @@
           "databases"
         ],
         "title": "MaxMindOut",
+        "type": "object"
+      },
+      "MeasurementAddressesOut": {
+        "properties": {
+          "addresses": {
+            "description": "The most tested address first; at most 50",
+            "items": {
+              "$ref": "#/components/schemas/AddressInfoOut"
+            },
+            "title": "Addresses",
+            "type": "array"
+          },
+          "databases_loaded": {
+            "description": "Whether any IP database is in use on this site",
+            "title": "Databases Loaded",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "databases_loaded",
+          "addresses"
+        ],
+        "title": "MeasurementAddressesOut",
         "type": "object"
       },
       "MeasurementOptions": {
@@ -6848,6 +6902,49 @@
           }
         },
         "summary": "Get Measurement",
+        "tags": [
+          "measurements"
+        ]
+      }
+    },
+    "/api/v1/measurements/{measurement_id}/addresses": {
+      "get": {
+        "description": "What the IP databases say about each address the nodes tested (place, network, AS), most tested first.\n\nIt belongs to the measurement: whoever may read the measurement may read this, whatever the IP lookup API's\nown access setting says, because the addresses are the ones the measurement itself tested (a name each node\nresolved for itself can be several) and nothing else can be asked for. `info` is null when no database is\ninstalled.",
+        "operationId": "tested_addresses_api_v1_measurements__measurement_id__addresses_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "measurement_id",
+            "required": true,
+            "schema": {
+              "title": "Measurement Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeasurementAddressesOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Tested Addresses",
         "tags": [
           "measurements"
         ]

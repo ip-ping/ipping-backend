@@ -16,7 +16,9 @@ both, in that order:
    internet path (a path is usually 1.2 to 3 times the fibre distance, plus about a millisecond; the
    factor that fits a place best is used, with a pull towards the typical 1.7), nearest nodes weighted
    most. Anything faster than light in fibre is penalised hard.
-3. **Always an answer, with its odds.** Whenever one node with a known position measured the address
+3. **A guess, always given, with its odds.** This is a best guess by design: it prefers an answer
+   that may be wrong, and says how often such answers are, to holding the answer back until it is
+   safe (the owner's choice: guess rather than make sure). Whenever one node with a known position measured the address
    there is an estimate, however thin the evidence; only a measurement with no such node has none.
    Nodes that cannot all be right (anycast, a rerouted path, a bad measurement) are not a reason to
    refuse: the estimate is made from the nearest node and the nodes that agree with it, and the
