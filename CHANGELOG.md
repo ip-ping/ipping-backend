@@ -2,7 +2,7 @@
 
 Progress log for `ipping-backend`, newest first. Each entry is one small, tested step.
 
-## v0.13.0 (unreleased)
+## v0.13.0 (2026-11-11)
 
 Every IP data source is a database that is downloaded and served from disk, and all nine are treated the same. No database change (still `0013`).
 

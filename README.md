@@ -8,7 +8,7 @@ This repository is the coordinator. It validates targets, schedules work onto no
 aggregates results, estimates where an address appears to be, and owns the contracts the other two
 repositories build against.
 
-Current release: **v0.12.0** (database migration head `0013`). Nodes of any earlier version keep
+Current release: **v0.13.0** (database migration head `0013`). Nodes of any earlier version keep
 working for ping; TCP, HTTP and traceroute need node v0.3.0 or newer, DNS checks need node v0.4.0, traceroute rounds and certificate checks need node v0.5.0, and DNS over HTTPS and QUIC need node v0.6.0 (DNS over HTTPS to quad9 needs v0.7.0, which speaks HTTP/2); a measurement that asks for either goes only to nodes that have it.
 
 | Repository | Role |
