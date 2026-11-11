@@ -2,6 +2,43 @@
 
 Progress log for `ipping-backend`, newest first. Each entry is one small, tested step.
 
+## v0.12.0 (2026-11-11)
+
+Nine IP data sources, each with a switch, and a majority vote with a percentage for every field. No database change (still `0013`: the
+switches and keys are rows of `app_settings`). Not released yet.
+
+- **Nine sources** beside the old single MaxMind: **DB-IP Lite**, **IPtoASN**, **IPdeny** and **ip2region** (databases the backend downloads and
+  keeps up to date itself, no account needed) and **IPinfo**, **IPLocate**, **ipapi.is** and **IP2Location** (online; each works without a key at
+  a low daily limit and takes an optional key or token). **All are on by default**, each can be turned off in the admin page, and the keys are
+  write-only (the API says only that one is set). `GET /api/v1/admin/ip-data` lists every source with its state and files, `PUT` takes
+  `sources: {id: {enabled, credentials}}` and `data_update_hours`, "Update now" fetches every database that is on, and turning a source on
+  starts its download. `IPPING_IPDATA_OFFLINE=true` stops every outgoing request of this module (no lookups, no downloads).
+- **The vote** (`ipdata/consensus.py`): every field is answered by a majority of the sources that have something for it, and **answered
+  whenever one source does** (one of nine with data still gives that data). Only sources that agree on the country vote on region, city and
+  position, only those that agree on the AS number vote on the organization; places and organizations are compared without accents, case and
+  suffixes, positions within 60 km are one vote (the median is answered), a tie goes to the more reliable sources. **The percentage** is the
+  odds that the winner is right from each source's reliability for that kind of data (priors: they are not measured on a deployment, and
+  the README says so): `odds(value) / (1 + sum of the odds of every value given)`, shown from 1 to 99. One source of 80% gives 80, two agreeing 94,
+  two disagreeing about 44 each, three against one 93.
+- **The answer** (`GET /api/v1/ip/{address}`, and `info` of `GET /api/v1/measurements/{id}/addresses`) keeps every field it had and gains
+  `confidence` (a percentage for each answered field) and `sources` (every source, with what it said, whether it voted with the winner or against
+  it for each field, or why it did not answer: `disabled`, `needs_setup`, `waiting`, `offline`, `rate_limited`, `error`, `empty`). `source` and
+  `attribution` name only the sources that contributed. A 503 now means no source can answer at all.
+- **What is read how**: MaxMind and DB-IP as `.mmdb` files through `GeoIp` (which now keeps them apart by flavour and honours the switches);
+  IPtoASN and IPdeny as SQLite range tables built at download (`ipdata/ranges.py`, a few MB, no memory); ip2region's `.xdb` files with a small
+  reader of the format (`ipdata/xdb.py`, memory-mapped; checked against the real IPv4 and IPv6 files). Downloads are checked (must open, be the
+  right kind, answer for 8.8.8.8) and replaced atomically, with a lock and a status file shared by the processes; DB-IP's file names, IPtoASN
+  and IPdeny's and GitHub's HEAD `ETag` / `Last-Modified` say whether there is anything newer.
+- **What does not change**: the location estimate's cross-check, the traceroute networks and the node autofill keep using the local
+  MaxMind-format database (now honouring the switches); the online services are asked only by the lookup API and a measurement's addresses.
+- **Tested** (538 tests, 61 of them new): the cleaning of every source's words, the voting rules and the percentage, the range tables and
+  ip2region with files built in the tests, the real response shapes of the four online services (captured for 8.8.8.8) and the keyed shapes,
+  keys never in an answer, rate limiting, caching, failure in four ways at once with one source still answering, the downloader against
+  pretend servers (checks, atomic replacement, nothing downloaded twice, last month's DB-IP file, bad data replaces nothing, offline) and the
+  admin API (switches, write-only keys, refusals, "Update now" to files to lookups). **Also run against the real services once**: the four
+  databases downloaded in 9 seconds and checked, and eight sources voted for 8.8.8.8, 1.1.1.1 and 114.114.114.114 (the real MaxMind was
+  not tried: no account).
+
 ## v0.11.0 (2026-11-11)
 
 Released and verified: the files match `SHA256SUMS` and carry attestations, and `ipping-backend:0.11.0` is on Docker Hub. The

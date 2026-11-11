@@ -8,7 +8,7 @@ This repository is the coordinator. It validates targets, schedules work onto no
 aggregates results, estimates where an address appears to be, and owns the contracts the other two
 repositories build against.
 
-Current release: **v0.11.0** (database migration head `0013`). Nodes of any earlier version keep
+Current release: **v0.12.0** (database migration head `0013`). Nodes of any earlier version keep
 working for ping; TCP, HTTP and traceroute need node v0.3.0 or newer, DNS checks need node v0.4.0, traceroute rounds and certificate checks need node v0.5.0, and DNS over HTTPS and QUIC need node v0.6.0 (DNS over HTTPS to quad9 needs v0.7.0, which speaks HTTP/2); a measurement that asks for either goes only to nodes that have it.
 
 | Repository | Role |
@@ -99,6 +99,7 @@ bring up the backend together with the frontend, database and reverse proxy.
 | `IPPING_GEOIP_CITY_DB` / `IPPING_GEOIP_ASN_DB` | unset | Explicit paths to a city and an ASN database instead of a directory |
 | `IPPING_MAXMIND_ACCOUNT_ID` / `IPPING_MAXMIND_LICENSE_KEY` | unset | A MaxMind account ID and license key for the GeoLite2 downloads, instead of entering them in the admin page (the page then says they come from the environment and cannot be changed there) |
 | `IPPING_MAXMIND_BASE_URL` | `https://download.maxmind.com` | Where the GeoLite2 databases are downloaded from (a mirror); https only |
+| `IPPING_IPDATA_OFFLINE` | `false` | No outgoing request for IP data: the online sources (IPinfo, IPLocate, ipapi.is, IP2Location) are not asked and the databases that need no account are not downloaded. What is already on disk still answers. For servers that may not call out |
 | `IPPING_GEOFEED_URLS` | unset | Comma-separated https addresses of geofeeds (RFC 8805) for `ipping-backend geofeed-update` to fetch into `IPPING_GEOIP_DIR`; nothing is fetched until that command runs |
 | `FORWARDED_ALLOW_IPS` | `127.0.0.1` | Reverse proxies whose `X-Forwarded-*` headers are trusted |
 
@@ -130,7 +131,7 @@ Interactive docs are at `/api/docs`; the machine-readable contract is `contracts
 | `POST /api/v1/nodes/enroll`, `WS /api/v1/nodes/connect` | what a node uses |
 | `/api/v1/admin/...` | nodes (approve, revoke), enrollment tokens, settings, audit, status |
 | `GET /api/v1/text?target=...` | with an API key: start a measurement, wait, and get the result as plain text (for `curl` and the command-line client) |
-| `/api/v1/admin/ip-data` | the MaxMind account (the key is never sent back), the databases in use, and the lookup API's settings: `GET`, `PUT`, and `POST .../update` to download now |
+| `/api/v1/admin/ip-data` | the nine IP data sources (each with its switch, credentials and state), the MaxMind account (the key is never sent back), the databases in use, and the lookup API's settings: `GET`, `PUT`, and `POST .../update` to download now |
 | `/api/v1/admin/api-keys/...` | API keys for scripts: create (shown once), change quotas, revoke |
 | `/api/v1/admin/watches/...` | scheduled checks and alerts: list, create, change, delete, `run`, `test-alert`, `runs` (see below) |
 | `GET /api/v1/health/live`, `/ready` | liveness and readiness |
@@ -381,7 +382,8 @@ visitor's behind a proxy that is set up as the installer does) answers:
 ```
 
 A private or reserved address is answered with `public: false` and nothing looked up; an address the databases do not know
-with `found: false`; text that is not an address is a 422; with no database installed, a 503 that says how to get one. The
+with `found: false`; text that is not an address is a 422; with no source able to answer (all off, or only online ones on an offline
+server and no database), a 503 that says how to get one. The
 admin page sets whether it is **on**, **who may use it** (an API key or an administrator's session by default, or anyone, or
 administrators only) and **how many lookups a minute** one client address may make (60 by default; administrators are not
 limited). The API keys are the ones for scripts (see above).
@@ -406,6 +408,77 @@ km from the data's, or a typed or reported city that the gazetteer places more t
 place comes from the data (and any it supplied earlier is taken back), while the provider and the AS number, which belong to the
 address and not to a place, are still filled in; fixing or clearing what disagrees lets the data fill the place again. A record
 with no city (the centre of a country or region) is never used as a position.
+
+### IP data: nine sources, one vote
+
+MaxMind is one of nine sources. Every source has a **switch** in the admin page (IP data), **all on by default**, and the ones that
+can take a key have a field for it. The lookup API and a measurement's addresses ask every source that is on, at once, and
+**vote**.
+
+| Source | Kind | What it knows | Needs |
+|---|---|---|---|
+| MaxMind GeoLite2 | database | country, region, city, position, time zone, AS, organization | a free account: account ID and license key (see above) |
+| DB-IP Lite | database | country, region, city, position, AS, organization | nothing (CC BY 4.0, shown with the answer); about 150 MB, monthly |
+| IPtoASN | database | AS number, organization, country | nothing (public domain); 11 MB, renewed upstream hourly |
+| IPdeny | database | country | nothing; two small files |
+| ip2region | database | country, region, city (best for China) | nothing (Apache-2.0); about 50 MB |
+| IPinfo | online | country, region, city, position, postal code, time zone, AS, organization | optional token |
+| IPLocate | online | the same | optional API key |
+| ipapi.is | online | country, region, city, position, time zone, AS, organization | optional API key |
+| IP2Location (IP2Location.io) | online | country, region, city, position, postal code, AS, organization | optional API key |
+
+* **Databases** that need no account are downloaded and kept up to date by the backend itself (`ipdata/downloader.py`), into
+  `IPPING_GEOIP_DIR`, once the directory exists: a HEAD request asks whether the server has something newer
+  (`data_update_hours`, 24 by default, 6 to 168), only then is the file downloaded, and it is checked (it must open, be the right
+  kind and answer for a well known address) before it is put in place by an atomic rename. A failure is tried again after an
+  hour. Several processes share the work through a lock and a status file in the directory. DB-IP, IPtoASN and IPdeny are
+  tables and files, ip2region's `.xdb` is read with a small reader of its format (`ipdata/xdb.py`); nothing here needs a new
+  library. Turning a source on starts its download; "Update now" fetches them all.
+* **Online sources** work without a key at a low daily limit (IPinfo, IPLocate and ipapi.is about a thousand a day, IP2Location
+  1,000 a day, or 50,000 a month with a free key) and better with one. An answer is kept for a day, a failure for two minutes, and a
+  service that says it is out of requests (HTTP 429) is left alone for as long as it asks (ten minutes if it does not say).
+  A key is sent only to its service, in the way that service asks, and is never in an answer, an error message or a log line.
+  **The address that is looked up is sent to these services**: that is what they are for, and the default is on, as asked.
+  An administrator who does not want that turns them off in the page, or the whole module with `IPPING_IPDATA_OFFLINE=true`.
+  Only the lookup API and a measurement's addresses ask them; the location estimate's cross-check, a traceroute's networks and the
+  node autofill stay on the local databases (whichever of MaxMind's and DB-IP's files is newest, honouring the switches).
+* **Keys are write-only**, like MaxMind's: the API takes them (`PUT .../ip-data` with `sources: {"ipinfo": {"credentials":
+  {"token": "…"}}}`, an empty string clears one) and only ever says whether one is set. They are stored in `app_settings`, not
+  encrypted.
+
+**The vote.** Each field is voted on by the sources that have something for it, and **answered whenever at least one does**: one
+source of nine with data, the other eight empty, failed or off, still gives that one. The value with the most votes wins (a tie
+goes to the more reliable sources for that field), and the sources are held together: only those that agree on the country vote on
+the region, the city and the position, and only those that agree on the AS number vote on the organization. Places are compared
+as letters and digits without accents or case (`São Paulo` and `Sao Paulo`), organizations without their suffixes (`Google LLC`
+and `GOOGLE`), and positions that are within 60 km of each other are one vote, answered with the median of them.
+
+**The percentage.** Every answered field says how likely it is to be right. Each source has a *reliability* for each kind of data
+(`ipdata/consensus.py`: country 93 to 98%, region 72 to 82%, city 62 to 72%, AS number 96 to 99%, and so on), and speaks with
+the odds `a / (1 - a)`. Sources that are right and wrong independently, and wrong in different ways, agree on a wrong value
+only by accident, so the odds of a value are the product of the odds of the sources that gave it, and
+
+    percent = odds(value) / (1 + the odds of every value that was given)     (shown from 1 to 99, never 0 or 100)
+
+One source with a reliability of 80% gives 80%; two that agree give 94%; two that disagree give about 44% each; three against
+one give 93%. A city that one source gave and eight did not is answered with that source's own figure. **These reliabilities are
+priors, from what the vendors publish and from how much easier a country is than a city; they are not measured on your
+deployment**, and the percentage is an estimate of how sure the vote is, not a guarantee. Anycast addresses, hosting
+providers and carrier-grade NAT make every IP database wrong in the same way, and agreement does not fix that.
+
+**The answer** gains two fields. `confidence` maps each answered field (`country`, `region`, `city`, `location`, `postal_code`,
+`time_zone`, `asn`, `organization`) to its percentage, and `sources` lists **every** source: what it said, whether it voted with
+the winner or against it for each field, or why it did not answer (`disabled`, `needs_setup`, `waiting` for its first download,
+`offline`, `rate_limited`, `error` with a sentence, `empty` when it does not know the address). `found` is true when any
+source had something, and `source` and `attribution` name only the sources that contributed.
+
+```json
+{"address": "8.8.8.8", "found": true, "country": "US", "city": "Mountain View", "asn": 15169, "organization": "Google LLC",
+ "confidence": {"country": 99, "region": 99, "city": 97, "location": 96, "time_zone": 99, "asn": 99, "organization": 99, "postal_code": 40},
+ "sources": [{"id": "dbip", "name": "DB-IP Lite", "kind": "database", "status": "ok",
+              "said": {"country": "US", "city": "Mountain View", "asn": 15169}, "agrees": ["asn", "city", "country"], "differs": []},
+             {"id": "maxmind", "status": "needs_setup", "message": "Needs a MaxMind account ID and license key.", "...": "..."}]}
+```
 
 ### Geofeeds as another claim (optional, opt-in)
 
@@ -538,6 +611,7 @@ first because the application release pins it.
 
 | Release | Database head | Notes |
 |---|---|---|
+| v0.12.0 | `0013` | **nine IP data sources and a vote**: DB-IP Lite, IPtoASN, IPdeny and ip2region (downloaded by the backend) and IPinfo, IPLocate, ipapi.is and IP2Location (online, optional keys) beside MaxMind, each with a switch (all on by default); the lookup answers every field with a percentage and lists every source; `IPPING_IPDATA_OFFLINE`; no database change |
 | v0.11.0 | `0013` | the web interface's languages are settings (`languages_enabled`, `default_language`, `language_auto_detect`) and `GET /api/v1/config` says what they are; no database change |
 | v0.10.0 | `0013` | **the location estimate is not strict any more**: an answer whenever any node with a position measured the address (fewer than 3 nodes, a far closest node and nodes that disagree are warnings, not refusals), an `accuracy` percentage measured on real targets (`accuracy.percent` within `radius_km`, `by_radius`), and `conflicting` when the nodes disagree (model `multilateration-5`); `GET /measurements/{id}/addresses`; **enrollment keys can be reusable** (migration `0013`, up to 30 days); **no node key rotation**; **a revoked node is removed** |
 | v0.9.0 | `0012` | **each node resolves a hostname itself by default** (`dns_mode` is `regional`; it was `fixed`), and `resolve_node_id` lets one chosen node resolve it for every node (migration `0012` adds `measurements.resolved_by`); the location estimate works for names the nodes resolved themselves, by the address each measured (`groups`, `?ip=`) |
@@ -630,6 +704,7 @@ Small steps, each one committed and logged in [CHANGELOG.md](CHANGELOG.md).
 - [ ] Over the real public IPv6 internet (needs a host with IPv6 connectivity; neither the development machine nor CI runners have it)
 - [x] Estimated network location: constraint-based, evidence listed, always an answer when any node with a position took part, with an accuracy percentage measured on real targets and the disagreement of nodes (anycast) said, not refused
 - [x] Calibrate the location model against real targets of known location (RIPE Atlas anchors; held-out half reported)
+- [x] Nine IP data sources with a switch each (all on), optional keys for the online ones, and a majority vote with a percentage for every field
 - [x] MaxMind GeoLite2 from the admin page (account ID and license key, downloaded, checked, kept up to date), a lookup API at `/api/v1/ip` with settings, and nodes filled in from their address
 - [x] Name resolution is a choice: each node resolves a hostname itself (default), or one chosen node resolves it for all; the location estimate follows the address each node measured
 - [x] A GeoIP / ASN database as a checked second opinion (ruled out by the measurements, or consistent), and geofeeds (RFC 8805) from the feeds an administrator lists, checked the same way

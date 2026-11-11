@@ -16,6 +16,7 @@ import ipaddress
 import logging
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -62,6 +63,14 @@ class RuledOut:
 
 def _first(*values: Any) -> Any:
     return next((v for v in values if v), None)
+
+
+def flavour_of(name: str) -> str:
+    """Whose database a file is, by its name: `maxmind` (GeoLite2 and GeoIP2, and anything else MaxMind-format) or `dbip`."""
+    lowered = name.lower()
+    if lowered.startswith(("geolite2", "geoip2")):
+        return "maxmind"
+    return "dbip" if "dbip" in lowered or "db-ip" in lowered else "maxmind"
 
 
 class _Database:
@@ -159,7 +168,12 @@ class GeoIp:
         }
         self._found: dict[str, _Database | None] = {"city": None, "asn": None, "country": None}
         self._next_scan = {"city": 0.0, "asn": 0.0, "country": 0.0}
+        # one file per (flavour, kind) for the sources that are read apart (MaxMind's, DB-IP's)
+        self._found_flavoured: dict[tuple[str, str], _Database | None] = {}
+        self._next_scan_flavoured: dict[tuple[str, str], float] = {}
         self._lock = threading.Lock()
+        # Whether a flavour (`maxmind`, `dbip`) may be used: the administrator can turn a source off
+        self.enabled: Callable[[str], bool] = lambda flavour: True
 
     @classmethod
     def from_settings(cls, directory: str | None, city: str | None, asn: str | None) -> GeoIp:
@@ -177,7 +191,7 @@ class GeoIp:
         chosen: Path | None = None
         for path in self._dir.iterdir():
             name = path.name.lower()
-            if not name.endswith(".mmdb") or kind not in name:
+            if not name.endswith(".mmdb") or kind not in name or not self.enabled(flavour_of(name)):
                 continue
             try:
                 rank = (name.startswith(("geolite2", "geoip2")), path.stat().st_mtime)
@@ -192,11 +206,49 @@ class GeoIp:
         with self._lock:
             for kind in self._next_scan:
                 self._next_scan[kind] = 0.0
+            for key in self._next_scan_flavoured:
+                self._next_scan_flavoured[key] = 0.0
+
+    def flavoured(self, flavour: str, kind: str) -> _Database | None:
+        """The database of this kind that belongs to one source (`maxmind` or `dbip`), whether or not it is the one in use.
+
+        An explicit path counts for the flavour its name says; in a directory it is the newest file of that flavour.
+        """
+        fixed = self._fixed.get(kind)
+        if fixed is not None and flavour_of(fixed.path.name) == flavour:
+            return fixed
+        if self._dir is None:
+            return None
+        key = (flavour, kind)
+        now = time.monotonic()
+        with self._lock:
+            if now >= self._next_scan_flavoured.get(key, 0.0):
+                self._next_scan_flavoured[key] = now + self._scan_every_s
+                newest: Path | None = None
+                newest_at = -1.0
+                try:
+                    for path in self._dir.iterdir():
+                        name = path.name.lower()
+                        if name.endswith(".mmdb") and kind in name and flavour_of(name) == flavour:
+                            try:
+                                modified = path.stat().st_mtime
+                            except OSError:
+                                continue
+                            if modified > newest_at:
+                                newest, newest_at = path, modified
+                except OSError:
+                    newest = None
+                current = self._found_flavoured.get(key)
+                if newest is None:
+                    self._found_flavoured[key] = None
+                elif current is None or current.path != newest:
+                    self._found_flavoured[key] = _Database(newest)
+            return self._found_flavoured.get(key)
 
     def _database(self, kind: str) -> _Database | None:
         fixed = self._fixed[kind]
         if fixed is not None or self._dir is None:
-            return fixed
+            return fixed if fixed is None or self.enabled(flavour_of(fixed.path.name)) else None
         now = time.monotonic()
         with self._lock:
             if now >= self._next_scan[kind]:

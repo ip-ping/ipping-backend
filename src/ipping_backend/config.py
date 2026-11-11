@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     maxmind_account_id: str | None = None
     maxmind_license_key: str | None = None
     maxmind_base_url: str = "https://download.maxmind.com"
+    # No outgoing request for IP data: the online sources (IPinfo, IPLocate, ipapi.is, IP2Location) are not asked and the
+    # databases are not downloaded. The databases already on disk still answer. For servers that may not call out.
+    ipdata_offline: bool = False
     # Geofeeds (RFC 8805) of networks, as a comma-separated list of https URLs. Nothing is fetched until
     # `ipping-backend geofeed-update` runs, and the result is kept in the GeoIP directory.
     geofeed_urls: str | None = None

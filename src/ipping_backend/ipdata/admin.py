@@ -11,14 +11,26 @@ from ..deps import AdminUser, Db, client_ip, csrf_protect
 from ..errors import ApiError
 from ..models import AuditEvent
 from ..nodes.autofill import refresh_all
+from . import downloader, runtime
+from .catalog import BY_ID, CATALOG
 from .options import (
     EDITIONS,
     IpDataUpdate,
     load_credentials,
+    load_keys,
     load_options,
     save,
 )
-from .schemas import DatabaseOut, IpDataOut, LookupSettingsOut, MaxMindOut, StatusErrorOut
+from .schemas import (
+    CredentialOut,
+    DatabaseOut,
+    IpDataOut,
+    LookupSettingsOut,
+    MaxMindOut,
+    SourceAdminOut,
+    SourceFileOut,
+    StatusErrorOut,
+)
 from .updater import MaxMindUpdater, _parse, due
 
 router = APIRouter(
@@ -28,6 +40,92 @@ router = APIRouter(
 
 def _when(value: Any) -> datetime | None:
     return _parse(value)
+
+
+async def _sources(request: Request, db: Db) -> list[SourceAdminOut]:
+    state = request.app.state
+    service = state.ipdata
+    options = await load_options(db)
+    keys = await load_keys(db)
+    maxmind_credentials = await load_credentials(db, state.settings)
+    maxmind_status = state.maxmind.status()
+    data_status = state.dataupdater.status()["sources"]
+    out = []
+    for info in CATALOG:
+        status, detail = service.state(info.id)
+        credentials = []
+        for field in info.credentials:
+            if info.id == "maxmind":
+                value = maxmind_credentials.account_id if field.name == "account_id" else ""
+                is_set = bool(
+                    value if field.name == "account_id" else maxmind_credentials.license_key
+                )
+            else:
+                value = keys.get(info.id, {}).get(field.name, "")
+                is_set = bool(value)
+            credentials.append(
+                CredentialOut(
+                    name=field.name,
+                    label=field.label,
+                    secret=field.secret,
+                    required=field.required,
+                    set=is_set,
+                    value=None if field.secret or not is_set else value,
+                )
+            )
+        running = False
+        last_attempt = last_success = next_at = None
+        error: str | None = None
+        if info.id == "maxmind":
+            entry_error = maxmind_status["error"]
+            running = bool(maxmind_status["running"])
+            last_attempt, last_success = (
+                _when(maxmind_status["last_attempt"]),
+                _when(maxmind_status["last_success"]),
+            )
+            error = entry_error["message"] if entry_error else None
+        elif info.kind == "database":
+            entry = data_status.get(info.id, {})
+            running = bool(entry.get("running"))
+            last_attempt, last_success = (
+                _when(entry.get("last_attempt")),
+                _when(entry.get("last_success")),
+            )
+            error = (entry.get("error") or {}).get("message")
+            if options.enabled(info.id) and not service.offline:
+                next_at = downloader.next_check(options, entry)
+        else:
+            health = service.health[info.id]
+            if health.at:
+                last_attempt = datetime.fromtimestamp(health.at, UTC)
+                if health.status in ("error", "rate_limited"):
+                    error = health.message
+                else:
+                    last_success = last_attempt
+        out.append(
+            SourceAdminOut(
+                id=info.id,
+                name=info.name,
+                kind=info.kind,
+                homepage=info.homepage,
+                summary=info.summary,
+                cost=info.cost,
+                attribution=info.attribution,
+                enabled=options.enabled(info.id),
+                state=status,
+                detail=detail,
+                credentials=credentials,
+                files=[SourceFileOut(**f) for f in service.local.files(info.id)]
+                if info.kind == "database"
+                else [],
+                running=running,
+                last_attempt=last_attempt,
+                last_success=last_success,
+                next_check=next_at,
+                error=error,
+            )
+        )
+    return out
 
 
 async def _build(request: Request, db: Db) -> IpDataOut:
@@ -90,9 +188,12 @@ async def _build(request: Request, db: Db) -> IpDataOut:
             per_minute=options.lookup_per_minute,
         ),
         node_autofill=options.node_autofill,
-        databases_loaded=bool(loaded),
+        databases_loaded=state.ipdata.available(),
         source=state.geoip.source if loaded else None,
         attribution=state.geoip.attribution,
+        sources=await _sources(request, db),
+        offline=state.ipdata.offline,
+        data_update_hours=options.data_update_hours,
     )
 
 
@@ -123,6 +224,10 @@ async def put_ip_data(body: IpDataUpdate, request: Request, admin: AdminUser, db
     await db.commit()
     state = request.app.state
     after = await load_options(db)
+    await runtime.reload(state)  # the sources use the new switches and keys at once
+    turned_on = [s for s in BY_ID if after.enabled(s) and not before.enabled(s)]
+    if turned_on:
+        state.dataupdater.start(force=False)  # a database that was just turned on is not waited for
     if after.node_autofill and not before.node_autofill:
         await refresh_all(
             state.sessionmaker, state.geoip
@@ -143,9 +248,25 @@ async def update_now(request: Request, admin: AdminUser, db: Db) -> IpDataOut:
             "no_directory",
             "The backend has no directory to keep the databases in (IPPING_GEOIP_DIR).",
         )
-    if not (await load_credentials(db, state.settings)).usable:
-        raise ApiError(409, "no_credentials", "Enter the MaxMind account ID and license key first.")
-    state.maxmind.start(force=True)
+    options = await load_options(db)
+    credentials = await load_credentials(db, state.settings)
+    started = False
+    if credentials.usable and options.enabled("maxmind"):
+        state.maxmind.start(force=True)
+        started = True
+    if not state.dataupdater.offline:
+        state.dataupdater.start(force=True)
+        started = True
+    if not started:
+        if options.enabled("maxmind") and not credentials.usable:
+            raise ApiError(
+                409, "no_credentials", "Enter the MaxMind account ID and license key first."
+            )
+        raise ApiError(
+            409,
+            "offline",
+            "This server may not call out (IPPING_IPDATA_OFFLINE), so nothing is downloaded.",
+        )
     db.add(
         AuditEvent(
             actor=admin.username,

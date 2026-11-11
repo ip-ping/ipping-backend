@@ -26,6 +26,9 @@ from .geolocation.geofeed import Geofeeds
 from .geolocation.geoip import GeoIp
 from .ipdata import admin as ipdata_admin
 from .ipdata import router as ipdata_router
+from .ipdata import runtime as ipdata_runtime
+from .ipdata.downloader import DataUpdater
+from .ipdata.service import IpDataService
 from .ipdata.updater import MaxMindUpdater
 from .logging_config import configure_logging
 from .measurements import router as measurements_router
@@ -134,6 +137,19 @@ def create_app(
         app.state.maxmind = MaxMindUpdater(
             sessionmaker, settings, app.state.geoip, on_updated=refresh_nodes
         )
+        # Every IP data source, asked and voted on (see ipdata/service.py), and the databases that need no account kept up to date
+        data_dir = Path(settings.geoip_dir) if settings.geoip_dir else None
+        app.state.ipdata = IpDataService(
+            lambda: app.state.geoip, data_dir, offline=settings.ipdata_offline
+        )
+        app.state.dataupdater = DataUpdater(
+            sessionmaker,
+            data_dir,
+            lambda: app.state.geoip,
+            offline=settings.ipdata_offline,
+            enabled=app.state.ipdata.enabled,
+            on_updated=refresh_nodes,
+        )
 
         if create_schema:
             async with db_engine.begin() as conn:
@@ -155,6 +171,10 @@ def create_app(
         loops.append(asyncio.create_task(maintenance.loop(sessionmaker), name="maintenance"))
         loops.append(asyncio.create_task(scheduler.run(), name="watches"))
         loops.append(asyncio.create_task(app.state.maxmind.run(), name="maxmind"))
+        loops.append(asyncio.create_task(app.state.dataupdater.run(), name="ipdata-update"))
+        loops.append(
+            asyncio.create_task(ipdata_runtime.settings_loop(app.state), name="ipdata-settings")
+        )
         app.state.loops = loops  # tests stop these to simulate a process that is simply gone
         try:
             yield
@@ -164,6 +184,7 @@ def create_app(
             await asyncio.gather(*loops, return_exceptions=True)
             await engine.shutdown()
             await cluster.stop()
+            await app.state.ipdata.close()
             await db_engine.dispose()
 
     app = FastAPI(

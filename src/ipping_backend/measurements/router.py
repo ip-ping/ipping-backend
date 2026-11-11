@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncIterator
 from typing import Annotated, Any
@@ -22,7 +23,7 @@ from ..geolocation.geoip import valid_ip
 from ..geolocation.path import path_for
 from ..geolocation.schemas import LocationEstimateOut, PathOut
 from ..geolocation.service import UnknownAddress, location_for
-from ..ipdata.lookup import lookup
+from ..ipdata.schemas import IpInfoOut
 from ..models import (
     ApiKey,
     Measurement,
@@ -197,17 +198,22 @@ async def tested_addresses(
             .limit(MAX_ADDRESSES)
         )
     ).all()
-    geoip = request.app.state.geoip
-    loaded = bool(geoip.databases())
-    addresses = []
-    for address, nodes in rows:
-        info = None
-        if loaded:
-            try:
-                info = lookup(geoip, address)
-            except ValueError:  # not an address: a node's report is never trusted to be one
-                info = None
-        addresses.append(schemas.AddressInfoOut(address=address, nodes=nodes, info=info))
+    service = request.app.state.ipdata
+    loaded = service.available()
+
+    async def info_for(address: str) -> IpInfoOut | None:
+        if not loaded:
+            return None
+        try:
+            return await service.lookup(address)  # type: ignore[no-any-return]
+        except ValueError:  # not an address: a node's report is never trusted to be one
+            return None
+
+    infos = await asyncio.gather(*(info_for(address) for address, _ in rows))
+    addresses = [
+        schemas.AddressInfoOut(address=address, nodes=nodes, info=info)
+        for (address, nodes), info in zip(rows, infos, strict=True)
+    ]
     return schemas.MeasurementAddressesOut(databases_loaded=loaded, addresses=addresses)
 
 

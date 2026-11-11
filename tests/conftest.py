@@ -31,6 +31,7 @@ def settings(tmp_path: Path) -> Settings:
         cookie_secure=False,
         log_json=False,
         log_level="WARNING",
+        ipdata_offline=True,  # no test calls the Internet: the online IP data sources are not asked
     )
     if "IPPING_TEST_DATABASE_URL" in os.environ:
         asyncio.run(_reset_database(settings.database_url))

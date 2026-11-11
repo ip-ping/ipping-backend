@@ -1,7 +1,8 @@
 """What an administrator can set about IP data, stored in `app_settings`.
 
-The MaxMind license key is a credential: it is accepted by the admin API and used by the updater, and never sent back.
-It can also come from the environment (`IPPING_MAXMIND_ACCOUNT_ID`, `IPPING_MAXMIND_LICENSE_KEY`), which then wins.
+Every source has a switch (`source_enabled`: all on until turned off) and some take credentials. Credentials are accepted by the
+admin API and used by the sources, and never sent back. The MaxMind license key can also come from the environment
+(`IPPING_MAXMIND_ACCOUNT_ID`, `IPPING_MAXMIND_LICENSE_KEY`), which then wins.
 """
 
 from __future__ import annotations
@@ -14,15 +15,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..config import Settings
 from ..models import AppSetting
+from .catalog import BY_ID
 
 Edition = Literal["GeoLite2-City", "GeoLite2-Country", "GeoLite2-ASN"]
 EDITIONS: tuple[Edition, ...] = ("GeoLite2-City", "GeoLite2-Country", "GeoLite2-ASN")
 OPTIONS_KEY = "ip_data"
 CREDENTIALS_KEY = "maxmind_credentials"
+KEYS_KEY = "ip_data_keys"
 
 _ACCOUNT_ID = re.compile(r"[0-9]{1,12}\Z")
 # MaxMind keys are letters, digits and underscores; 16 to 64 of them
 _LICENSE_KEY = re.compile(r"[A-Za-z0-9_]{16,64}\Z")
+# the tokens and keys of the other sources: printable ASCII without spaces
+_SECRET = re.compile(r"[\x21-\x7e]{1,200}\Z")
 
 
 def _default_editions() -> list[Edition]:
@@ -43,11 +48,32 @@ class IpDataOptions(BaseModel):
     # Fill a node's country, city, place, provider and ASN from the address it connects from, where an
     # administrator has not typed one
     node_autofill: bool = True
+    # Which sources are used. Only the ones turned off or on explicitly are here: a source that is not listed is on.
+    source_enabled: dict[str, bool] = Field(default_factory=dict)
+    # How often the databases that need no account (DB-IP, IPtoASN, IPdeny, ip2region) are asked whether there is a newer file
+    data_update_hours: int = Field(default=24, ge=6, le=168)
 
     @field_validator("maxmind_editions")
     @classmethod
     def _unique(cls, value: list[Edition]) -> list[Edition]:
         return [e for e in EDITIONS if e in value]
+
+    @field_validator("source_enabled")
+    @classmethod
+    def _known(cls, value: dict[str, bool]) -> dict[str, bool]:
+        return {
+            k: bool(v) for k, v in value.items() if k in BY_ID
+        }  # an id that is gone is forgotten
+
+    def enabled(self, source: str) -> bool:
+        return self.source_enabled.get(source, True)
+
+
+class SourceUpdate(BaseModel):
+    """A change to one source: switch it, or set or clear its credentials (`""` clears one)."""
+
+    enabled: bool | None = None
+    credentials: dict[str, str] | None = None
 
 
 class IpDataUpdate(BaseModel):
@@ -60,9 +86,38 @@ class IpDataUpdate(BaseModel):
     lookup_access: Literal["public", "api_key", "admin"] | None = None
     lookup_per_minute: int | None = Field(default=None, ge=1, le=6000)
     node_autofill: bool | None = None
+    data_update_hours: int | None = Field(default=None, ge=6, le=168)
+    sources: dict[str, SourceUpdate] | None = None
     account_id: str | None = Field(default=None, max_length=32)
     license_key: str | None = Field(default=None, max_length=128, repr=False)
     clear_credentials: bool = False
+
+    @field_validator("sources")
+    @classmethod
+    def _sources(cls, value: dict[str, SourceUpdate] | None) -> dict[str, SourceUpdate] | None:
+        if value is None:
+            return None
+        for source, update in value.items():
+            info = BY_ID.get(source)
+            if info is None:
+                raise ValueError(f"There is no IP data source called {source}.")
+            if update.credentials is None:
+                continue
+            if source == "maxmind":
+                raise ValueError(
+                    "The MaxMind account ID and license key are set with account_id and license_key."
+                )
+            allowed = {c.name for c in info.credentials}
+            for name, secret in update.credentials.items():
+                if name not in allowed:
+                    raise ValueError(f"{info.name} takes no {name}.")
+                secret = secret.strip()
+                if secret and not _SECRET.match(secret):
+                    raise ValueError(
+                        f"That does not look like a key or token (letters, digits and symbols, no spaces): {info.name} {name}."
+                    )
+                update.credentials[name] = secret
+        return value
 
     @field_validator("account_id")
     @classmethod
@@ -119,11 +174,45 @@ async def load_credentials(db: AsyncSession, settings: Settings) -> Credentials:
     return Credentials()
 
 
+async def load_keys(db: AsyncSession) -> dict[str, dict[str, str]]:
+    """The credentials of the sources that are not MaxMind: `{source: {field: value}}`."""
+    row = await db.get(AppSetting, KEYS_KEY)
+    stored = row.value if row is not None and isinstance(row.value, dict) else {}
+    return {
+        source: {k: str(v) for k, v in fields.items() if v}
+        for source, fields in stored.items()
+        if source in BY_ID and isinstance(fields, dict)
+    }
+
+
 async def save(db: AsyncSession, update: IpDataUpdate) -> None:
     """Apply an update (the caller commits). The credentials are replaced or cleared, never merged blindly."""
     changes = update.model_dump(
-        exclude_none=True, exclude={"account_id", "license_key", "clear_credentials"}
+        exclude_none=True,
+        exclude={"account_id", "license_key", "clear_credentials", "sources"},
     )
+    if update.sources:
+        enabled = dict((await load_options(db)).source_enabled)
+        for source, change in update.sources.items():
+            if change.enabled is not None:
+                enabled[source] = change.enabled
+        changes["source_enabled"] = enabled
+        keys = await load_keys(db)
+        touched = False
+        for source, change in update.sources.items():
+            for name, secret in (change.credentials or {}).items():
+                touched = True
+                if secret:
+                    keys.setdefault(source, {})[name] = secret
+                else:
+                    keys.get(source, {}).pop(name, None)
+        if touched:
+            payload = {s: f for s, f in keys.items() if f}
+            row = await db.get(AppSetting, KEYS_KEY)
+            if row is None:
+                db.add(AppSetting(key=KEYS_KEY, value=payload))
+            else:
+                row.value = payload
     if changes:
         current = (await load_options(db)).model_dump()
         current.update(changes)

@@ -2,16 +2,20 @@
 
 Who may use it, and how often, is set in the admin page (IP data): off, public, an API key (or an administrator's
 session), or administrators only, and a limit per client address a minute.
+
+An answer is the vote of every IP data source that is on (databases on disk, and the online services), with how sure each
+field is: see `ipdata/service.py` and `ipdata/consensus.py`.
 """
 
 from __future__ import annotations
+
+import ipaddress
 
 from fastapi import APIRouter, Request
 
 from ..deps import Db, OptionalApiKey, OptionalSession, client_ip
 from ..errors import ApiError
 from ..security.ratelimit import allow
-from .lookup import lookup
 from .options import load_options
 from .schemas import IpInfoOut
 
@@ -37,18 +41,19 @@ async def _gate(request: Request, db: Db, session: OptionalSession, key: Optiona
             raise ApiError(429, "rate_limited", "Too many lookups. Wait a minute.")
 
 
-def _answer(request: Request, address: str) -> IpInfoOut:
-    geoip = request.app.state.geoip
-    if not geoip.databases():
+async def _answer(request: Request, address: str) -> IpInfoOut:
+    service = request.app.state.ipdata
+    try:
+        ipaddress.ip_address(address)
+    except ValueError:
+        raise ApiError(422, "invalid_address", "That is not an IP address.") from None
+    if not service.available():
         raise ApiError(
             503,
             "no_database",
-            "No IP database is installed. An administrator can turn on MaxMind in the admin page (IP data).",
+            "No IP data source can answer: turn one on, or give MaxMind its account, in the admin page (IP data).",
         )
-    try:
-        return lookup(geoip, address)
-    except ValueError:
-        raise ApiError(422, "invalid_address", "That is not an IP address.") from None
+    return await service.lookup(address)  # type: ignore[no-any-return]
 
 
 @router.get("", response_model=IpInfoOut)
@@ -57,7 +62,7 @@ async def my_address(
 ) -> IpInfoOut:
     """What the databases say about the address this request comes from."""
     await _gate(request, db, session, key)
-    return _answer(request, client_ip(request) or "")
+    return await _answer(request, client_ip(request) or "")
 
 
 @router.get("/{address}", response_model=IpInfoOut)
@@ -66,4 +71,4 @@ async def address_info(
 ) -> IpInfoOut:
     """What the databases say about an IPv4 or IPv6 address: its network, place, time zone and AS."""
     await _gate(request, db, session, key)
-    return _answer(request, address)
+    return await _answer(request, address)
