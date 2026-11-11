@@ -2,7 +2,13 @@
 
 Progress log for `ipping-backend`, newest first. Each entry is one small, tested step.
 
-## v0.10.0 (2026-11-10, not released yet)
+## v0.10.0 (2026-11-11)
+
+Released and verified: the files match `SHA256SUMS` and carry attestations, a PostgreSQL database migrated by the released v0.9.0 image
+(with a used enrollment key in it) upgrades to `0013` with the released v0.10.0 image and the key counts one use, and the released image
+with two released node v0.8.0 containers enrolled both with **one reusable key and no name** (called `Sydney, AU` and `Frankfurt, DE`,
+`custom_name` empty, the key `reusable` with `uses` 2), approved them, ran a measurement on both, removed one by revoking it (gone from
+the list) and answered 404 to a key rotation.
 
 The location estimate is **not strict any more**: it always gives an estimate, with a percentage for how accurate answers like it
 have been. The database migrates to `0013` (reusable enrollment keys); the estimator model is now `multilateration-5`, so stored estimates are worked out again.
