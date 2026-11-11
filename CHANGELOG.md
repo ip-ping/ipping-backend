@@ -2,6 +2,19 @@
 
 Progress log for `ipping-backend`, newest first. Each entry is one small, tested step.
 
+## v0.11.0 (2026-11-11)
+
+The web interface's languages become settings. No database change (still `0013`: settings are rows of `app_settings`).
+
+- **Three new settings** an administrator changes in the admin page (or `PATCH /api/v1/admin/settings`): `languages_enabled` (which of
+  `en zh es fr de pt ru ja ko` a visitor can choose; all by default), `default_language` (`en`) and `language_auto_detect` (`true`: the
+  interface follows the browser's language until the visitor picks one). They must hold together: at least one language on and the
+  default among them; a change that breaks that is refused with 422 `invalid_settings` before anything is written.
+- **`GET /api/v1/config`**, for anyone with no session: `{"languages": {"enabled": [...], "default": "en", "auto_detect": true}}`, which
+  is what the interface asks before it draws itself.
+- Tests: four (the defaults and the public answer, a choice kept once each in the interface's order, contradictory settings refused and
+  nothing written, the choice in the audit trail).
+
 ## v0.10.0 (2026-11-11)
 
 Released and verified: the files match `SHA256SUMS` and carry attestations, a PostgreSQL database migrated by the released v0.9.0 image

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,6 +21,22 @@ from .nodes.protocol import PROBE_KINDS
 DEFAULT_ALLOWED_PORTS = [
     22, 25, 53, 80, 110, 143, 443, 465, 587, 853, 993, 995, 3306, 3389, 5432, 8080, 8443,
 ]  # fmt: skip
+
+
+# The languages the web interface has translations for (`ipping` `src/lib/i18n`): the codes an administrator can choose from.
+LANGUAGES: tuple[str, ...] = ("en", "zh", "es", "fr", "de", "pt", "ru", "ja", "ko")
+
+
+def _check_languages(value: list[str] | None) -> list[str] | None:
+    if value is None:
+        return None
+    if any(code not in LANGUAGES for code in value):
+        raise ValueError(f"languages must be among {', '.join(LANGUAGES)}")
+    if not value:
+        raise ValueError("at least one language must be on")
+    return [
+        code for code in LANGUAGES if code in set(value)
+    ]  # in the interface's own order, once each
 
 
 def _check_kinds(value: list[str] | None) -> list[str] | None:
@@ -73,9 +89,25 @@ class RuntimeSettings(BaseModel):
     watch_history_days: int = Field(default=30, ge=1, le=365)
     # Alerts go to an address an administrator typed; unless this is on it must be a public one.
     allow_private_webhooks: bool = False
+    # The web interface's languages: which ones a visitor can choose, the one used when nothing says otherwise, and
+    # whether the browser's own language is followed (until the visitor picks one, which the browser remembers).
+    languages_enabled: list[str] = Field(
+        default_factory=lambda: list(LANGUAGES), max_length=len(LANGUAGES)
+    )
+    default_language: str = "en"
+    language_auto_detect: bool = True
 
     validate_kinds = field_validator("enabled_kinds")(_check_kinds)
     validate_ports = field_validator("allowed_ports")(_check_ports)
+    validate_languages = field_validator("languages_enabled")(_check_languages)
+
+    @model_validator(mode="after")
+    def _default_is_on(self) -> RuntimeSettings:
+        if self.default_language not in LANGUAGES:
+            raise ValueError(f"default_language must be among {', '.join(LANGUAGES)}")
+        if self.default_language not in self.languages_enabled:
+            raise ValueError("default_language must be one of the languages that are on")
+        return self
 
 
 class RuntimeSettingsUpdate(BaseModel):
@@ -103,9 +135,13 @@ class RuntimeSettingsUpdate(BaseModel):
     min_watch_interval_s: int | None = Field(default=None, ge=30, le=3600)
     watch_history_days: int | None = Field(default=None, ge=1, le=365)
     allow_private_webhooks: bool | None = None
+    languages_enabled: list[str] | None = Field(default=None, max_length=len(LANGUAGES))
+    default_language: str | None = None
+    language_auto_detect: bool | None = None
 
     validate_kinds = field_validator("enabled_kinds")(_check_kinds)
     validate_ports = field_validator("allowed_ports")(_check_ports)
+    validate_languages = field_validator("languages_enabled")(_check_languages)
 
 
 async def load_settings(session: AsyncSession) -> RuntimeSettings:
@@ -117,6 +153,9 @@ async def load_settings(session: AsyncSession) -> RuntimeSettings:
 
 async def save_settings(session: AsyncSession, update: RuntimeSettingsUpdate) -> RuntimeSettings:
     changes = update.model_dump(exclude_none=True)
+    # What would be stored must hold together (a default language that is switched off, for one), checked before it is
+    # written: the whole of it or none of it.
+    RuntimeSettings.model_validate({**(await load_settings(session)).model_dump(), **changes})
     for key, value in changes.items():
         row = await session.get(AppSetting, key)
         if row is None:

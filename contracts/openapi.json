@@ -2213,6 +2213,35 @@
         "title": "IpInfoOut",
         "type": "object"
       },
+      "LanguagesOut": {
+        "properties": {
+          "auto_detect": {
+            "description": "Follow the browser's language until the visitor chooses one",
+            "title": "Auto Detect",
+            "type": "boolean"
+          },
+          "default": {
+            "description": "Used when the visitor has not chosen one and the browser's is not followed or not on",
+            "title": "Default",
+            "type": "string"
+          },
+          "enabled": {
+            "description": "The languages a visitor can choose, in the interface's order",
+            "items": {
+              "type": "string"
+            },
+            "title": "Enabled",
+            "type": "array"
+          }
+        },
+        "required": [
+          "enabled",
+          "default",
+          "auto_detect"
+        ],
+        "title": "LanguagesOut",
+        "type": "object"
+      },
       "LocationEstimateOut": {
         "properties": {
           "accuracy": {
@@ -3085,6 +3114,18 @@
         "title": "PlaceOut",
         "type": "object"
       },
+      "PublicConfig": {
+        "properties": {
+          "languages": {
+            "$ref": "#/components/schemas/LanguagesOut"
+          }
+        },
+        "required": [
+          "languages"
+        ],
+        "title": "PublicConfig",
+        "type": "object"
+      },
       "PublicNode": {
         "properties": {
           "asn": {
@@ -3380,12 +3421,30 @@
             "title": "Default Count",
             "type": "integer"
           },
+          "default_language": {
+            "default": "en",
+            "title": "Default Language",
+            "type": "string"
+          },
           "enabled_kinds": {
             "items": {
               "type": "string"
             },
             "maxItems": 8,
             "title": "Enabled Kinds",
+            "type": "array"
+          },
+          "language_auto_detect": {
+            "default": true,
+            "title": "Language Auto Detect",
+            "type": "boolean"
+          },
+          "languages_enabled": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 9,
+            "title": "Languages Enabled",
             "type": "array"
           },
           "max_concurrent_per_ip": {
@@ -3571,6 +3630,17 @@
             ],
             "title": "Default Count"
           },
+          "default_language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Language"
+          },
           "enabled_kinds": {
             "anyOf": [
               {
@@ -3585,6 +3655,32 @@
               }
             ],
             "title": "Enabled Kinds"
+          },
+          "language_auto_detect": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language Auto Detect"
+          },
+          "languages_enabled": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "maxItems": 9,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Languages Enabled"
           },
           "max_concurrent_per_ip": {
             "anyOf": [
@@ -5506,7 +5602,7 @@
   },
   "info": {
     "title": "ipping backend",
-    "version": "0.10.0"
+    "version": "0.11.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -6624,6 +6720,28 @@
         "summary": "Test Alert",
         "tags": [
           "watches"
+        ]
+      }
+    },
+    "/api/v1/config": {
+      "get": {
+        "description": "The interface's language settings (an administrator changes them under Settings).",
+        "operationId": "public_config_api_v1_config_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicConfig"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Public Config",
+        "tags": [
+          "config"
         ]
       }
     },

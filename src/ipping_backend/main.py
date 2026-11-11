@@ -35,6 +35,7 @@ from .models import AppSetting, Base, User
 from .nodes import router as nodes_router
 from .nodes.autofill import refresh_all
 from .nodes.registry import NodeRegistry
+from .public_config import router as config_router
 from .security.targets import Resolver, system_resolver
 from .watches import router as watches_router
 from .watches.service import WatchScheduler
@@ -183,6 +184,7 @@ def create_app(
     app.include_router(ipdata_admin.router)
     app.include_router(ipdata_router.router)
     app.include_router(text_router.router)
+    app.include_router(config_router)
 
     @app.get("/api/v1/health/live", tags=["health"])
     async def live() -> dict[str, str]:

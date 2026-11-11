@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Query, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy import delete, func, select
 
 from ..cluster import OnlineNode
@@ -474,7 +474,13 @@ async def get_settings(admin: AdminUser, db: Db) -> RuntimeSettings:
 async def patch_settings(
     body: RuntimeSettingsUpdate, request: Request, admin: AdminUser, db: Db
 ) -> RuntimeSettings:
-    updated = await save_settings(db, body)
+    try:
+        updated = await save_settings(db, body)
+    except ValidationError as exc:
+        first = exc.errors()[0]
+        raise ApiError(
+            422, "invalid_settings", str(first["msg"]).removeprefix("Value error, ")
+        ) from exc
     await _audit(
         db, admin, request, "settings.updated", fields=sorted(body.model_dump(exclude_none=True))
     )

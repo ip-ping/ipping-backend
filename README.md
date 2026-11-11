@@ -8,7 +8,7 @@ This repository is the coordinator. It validates targets, schedules work onto no
 aggregates results, estimates where an address appears to be, and owns the contracts the other two
 repositories build against.
 
-Current release: **v0.9.0** (database migration head `0012`; v0.10.0 is on `main`, not released). Nodes of any earlier version keep
+Current release: **v0.11.0** (database migration head `0013`). Nodes of any earlier version keep
 working for ping; TCP, HTTP and traceroute need node v0.3.0 or newer, DNS checks need node v0.4.0, traceroute rounds and certificate checks need node v0.5.0, and DNS over HTTPS and QUIC need node v0.6.0 (DNS over HTTPS to quad9 needs v0.7.0, which speaks HTTP/2); a measurement that asks for either goes only to nodes that have it.
 
 | Repository | Role |
@@ -107,7 +107,8 @@ through `PATCH /api/v1/admin/settings` (or the admin page): the emergency stop
 (`measurements_enabled`), per-visitor and per-IP concurrency, creations per minute, probe budgets
 (`max_probes_per_measurement`, `max_global_inflight_probes`), the deadline, default and maximum
 counts, the target denylist, retention, `enabled_kinds`, `allowed_ports` (for TCP, HTTP and TLS),
-`max_redirects`, `traceroute_max_hops` and `task_retries`.
+`max_redirects`, `traceroute_max_hops` and `task_retries`, and the web interface's languages (`languages_enabled`, `default_language`,
+`language_auto_detect`: see `GET /api/v1/config`).
 
 ## API at a glance
 
@@ -124,6 +125,7 @@ Interactive docs are at `/api/docs`; the machine-readable contract is `contracts
 | `GET /api/v1/ip`, `GET /api/v1/ip/{address}` | what the IP databases say about the caller's address, or any address: network, country, region, city, position, time zone, AS number and organisation (who may use it, and how often, is a setting; see "IP data") |
 | `GET /api/v1/measurements/{id}/path` | a traceroute's routers by address: network (ASN) and place from the GeoIP databases, if loaded (a hint to check against the round-trip time) |
 | `POST /api/v1/measurements/{id}/cancel`, `.../share` | cancel; make the link public |
+| `GET /api/v1/config` | what the web interface needs before it draws itself, for anyone: the languages it offers (`enabled`), the `default` one and whether to follow the browser's (`auto_detect`), all set by an administrator in the settings; the interface has translations for `en`, `zh`, `es`, `fr`, `de`, `pt`, `ru`, `ja` and `ko`, and at least one must be on, with the default among them (a settings change that breaks that is refused with 422 `invalid_settings` and nothing is written) |
 | `GET /api/v1/nodes` | the approved nodes, whether each is online, and the kinds it can run |
 | `POST /api/v1/nodes/enroll`, `WS /api/v1/nodes/connect` | what a node uses |
 | `/api/v1/admin/...` | nodes (approve, revoke), enrollment tokens, settings, audit, status |
@@ -536,6 +538,7 @@ first because the application release pins it.
 
 | Release | Database head | Notes |
 |---|---|---|
+| v0.11.0 | `0013` | the web interface's languages are settings (`languages_enabled`, `default_language`, `language_auto_detect`) and `GET /api/v1/config` says what they are; no database change |
 | v0.10.0 | `0013` | **the location estimate is not strict any more**: an answer whenever any node with a position measured the address (fewer than 3 nodes, a far closest node and nodes that disagree are warnings, not refusals), an `accuracy` percentage measured on real targets (`accuracy.percent` within `radius_km`, `by_radius`), and `conflicting` when the nodes disagree (model `multilateration-5`); `GET /measurements/{id}/addresses`; **enrollment keys can be reusable** (migration `0013`, up to 30 days); **no node key rotation**; **a revoked node is removed** |
 | v0.9.0 | `0012` | **each node resolves a hostname itself by default** (`dns_mode` is `regional`; it was `fixed`), and `resolve_node_id` lets one chosen node resolve it for every node (migration `0012` adds `measurements.resolved_by`); the location estimate works for names the nodes resolved themselves, by the address each measured (`groups`, `?ip=`) |
 | v0.8.1 | `0011` | fix: a node's place from the IP data is only used where it agrees with the place the node reported or an administrator typed (a different country, a position or a known city more than 300 km away is a conflict; the provider and AS number are still filled in), and a record with no city is not used as a position |
