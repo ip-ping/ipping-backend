@@ -6,6 +6,15 @@ Progress log for `ipping-backend`, newest first. Each entry is one small, tested
 
 Every IP data source is a database that is downloaded and served from disk, and all nine are treated the same. No database change (still `0013`).
 
+Released and verified: the files match `SHA256SUMS`, the wheel, the lockfile and the contracts carry attestations (and a file altered after release is
+refused), `ipping-backend:0.13.0` is on Docker Hub for amd64 and arm64, the contract is the one `ipping` v0.16.0 was built against, and `ipping`
+v0.16.0 pins this release. **The released image was run with nothing configured** (an empty data volume, online allowed, the released `ipping:0.16.0`
+beside it): it downloaded DB-IP, IPLocate, ipapi.is, IPtoASN, IPdeny and both ip2region files by itself in about a minute (440 MB), all six sources
+were `ready`, 8.8.8.8 and 1.1.1.1 were voted with the real data (Mountain View 99% on the country, South Brisbane for Cloudflare's anycast address),
+and the admin API had no `maxmind` block. A made-up IP2Location token saved in the page made the backend ask the **real IP2Location server**, which
+answered `NO PERMISSION` with status 200: it was recognised, shown as "IP2Location did not give the file (NO PERMISSION)", and the token appeared in no
+log line, status file or API answer. Not run against a real account: MaxMind, IPinfo Lite and the accepted-token path of IP2Location LITE.
+
 - **No source's API is called any more.** IPinfo, IPLocate, ipapi.is and IP2Location were asked over HTTPS on every lookup (v0.12.0). They are
   now their free downloadable databases, kept on disk like the other five: **IPinfo Lite** (`ipinfo_lite.mmdb`, a free account's token, checked
   against IPinfo's published checksum, which does not count against its ten downloads a day), **IPLocate** (its free country and ASN `.mmdb` files
