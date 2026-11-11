@@ -33,6 +33,7 @@ Every IP data source is a database that is downloaded and served from disk, and 
   credentials}}` only (MaxMind's are `account_id` and `license_key` there). `POST .../update` is now **check for newer files** (a source is downloaded only
   if it has something newer, so repeated clicks cost nothing and cannot use up MaxMind's 30 downloads a day) and answers 409 `nothing_to_update` when no source that
   is on can be downloaded yet. In an answer, `kind` is gone and `rate_limited` is not a status any more.
+- **The dashboard's status** (`GET /api/v1/admin/status`, `geoip.source`) names the sources that know places or networks when there are one or two, and how many (`7 IP data sources`) when there are more.
 - **A token cannot reach a log.** IPinfo's and IP2Location's downloads carry the token in the URL, and httpx writes the URL of every request
   at INFO, which is the server's level: `httpx` and `httpcore` are now kept at WARNING (tested with a control that shows the token *would* be
   logged otherwise), and failures are reported by what kind they were, never by the library's text. **This also applies to v0.12.0**, whose

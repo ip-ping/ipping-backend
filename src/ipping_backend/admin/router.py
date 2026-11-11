@@ -519,11 +519,13 @@ async def service_status(request: Request, admin: AdminUser, db: Db) -> ServiceS
     )
     ipdata = request.app.state.ipdata
     knowing = [i.name for i in ipdata.knowing("position", "asn")]
+    # their names when there are only a few, else how many (the page shows it in a line)
+    source = ", ".join(knowing) if len(knowing) <= 2 else f"{len(knowing)} IP data sources"
     return ServiceStatus(
         geoip=GeoIpStatus(
             city=ipdata.can("position"),
             asn=ipdata.can("asn"),
-            source=", ".join(knowing) or None,
+            source=source or None,
             geofeed_entries=request.app.state.geofeeds.entries,
         ),
         nodes_online=len(await _online(request, db)),

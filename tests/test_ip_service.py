@@ -1020,3 +1020,6 @@ def test_the_data_directory_files_are_what_the_page_lists(api: Api, tmp_path: Pa
     assert [f["name"] for f in sources["ip2region"]["files"]] == list(local.XDB_FILES.values())
     assert all(f["size"] > 0 for s in sources.values() for f in s["files"])
     assert all(s["state"] == "ready" for s in sources.values())
+    # the dashboard says how many sources know places or networks, not nine names in a line
+    geoip = api.get("/api/v1/admin/status").json()["geoip"]
+    assert geoip["city"] and geoip["asn"] and geoip["source"] == "7 IP data sources"
