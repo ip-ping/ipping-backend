@@ -212,6 +212,33 @@ def test_the_organization_is_voted_on_among_those_that_agree_on_the_number() -> 
     assert "ipapi_is" not in voted.differ["organization"]
 
 
+def test_the_many_ways_to_write_one_organization_are_one_vote() -> None:
+    google = decide(
+        {
+            "maxmind": R(asn=15169, organization="Google LLC"),
+            "iptoasn": R(asn=15169, organization="GOOGLE - Google LLC"),
+            "ipinfo": R(asn=15169, organization="Google LLC"),
+            "dbip": R(asn=15169, organization="Google Cloud"),
+        }
+    )
+    assert google.record.organization == "Google LLC" and google.differ["organization"] == []
+    assert google.percent["organization"] >= 97
+    hetzner = decide(
+        {
+            "ipinfo": R(asn=24940, organization="Hetzner Online GmbH"),
+            "iptoasn": R(asn=24940, organization="HETZNER-AS Hetzner Online GmbH"),
+        }
+    )
+    assert hetzner.agree["organization"] == ["ipinfo", "iptoasn"]
+    apart = decide(
+        {
+            "ipinfo": R(asn=3356, organization="Level 3 Parent, LLC"),
+            "iptoasn": R(asn=3356, organization="Lumen Technologies"),
+        }
+    )
+    assert apart.differ["organization"] != [] or len(apart.agree["organization"]) == 1
+
+
 def test_positions_in_one_place_are_one_vote_and_the_middle_is_taken() -> None:
     voted = decide(
         {

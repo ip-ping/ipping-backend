@@ -16,7 +16,8 @@ switches and keys are rows of `app_settings`). Not released yet.
 - **The vote** (`ipdata/consensus.py`): every field is answered by a majority of the sources that have something for it, and **answered
   whenever one source does** (one of nine with data still gives that data). Only sources that agree on the country vote on region, city and
   position, only those that agree on the AS number vote on the organization; places and organizations are compared without accents, case and
-  suffixes, positions within 60 km are one vote (the median is answered), a tie goes to the more reliable sources. **The percentage** is the
+  suffixes (`GOOGLE - Google LLC`, `Google LLC` and `Google Cloud` are one organization; found with the real IPtoASN data, whose names
+  are written that way), positions within 60 km are one vote (the median is answered), a tie goes to the more reliable sources. **The percentage** is the
   odds that the winner is right from each source's reliability for that kind of data (priors: they are not measured on a deployment, and
   the README says so): `odds(value) / (1 + sum of the odds of every value given)`, shown from 1 to 99. One source of 80% gives 80, two agreeing 94,
   two disagreeing about 44 each, three against one 93.

@@ -29,7 +29,7 @@ from collections.abc import Callable, Hashable, Sequence
 from dataclasses import dataclass, field
 from typing import Any
 
-from .records import Record, fold, organization_key
+from .records import Record, fold, organization_key, organization_words
 
 # Where a source is listed first, it wins a tie that reliability does not settle.
 ORDER = (
@@ -161,6 +161,25 @@ def _center(group: Sequence[tuple[str, tuple[float, float]]]) -> tuple[float, fl
     return round((lats[mid - 1] + lats[mid]) / 2, 4), round((lons[mid - 1] + lons[mid]) / 2, 4)
 
 
+def _same_organization(items: Sequence[tuple[str, str]]) -> list[tuple[str, int, str]]:
+    """Ballots (source, group, name) for names of networks: a name belongs to a group when its words are the group's, or
+    contain them, or are contained in them (`GOOGLE - Google LLC`, `Google LLC` and `Google Cloud` are one organization;
+    `Hetzner Online GmbH` and `HETZNER-AS` are one). Names are taken in the order given and join the first group they fit."""
+    groups: list[frozenset[str]] = []
+    ballots: list[tuple[str, int, str]] = []
+    for source, name in items:
+        words = organization_words(name)
+        for index, rep in enumerate(groups):
+            if words <= rep or rep <= words:
+                groups[index] = rep & words if rep & words else rep
+                break
+        else:
+            groups.append(words)
+            index = len(groups) - 1
+        ballots.append((source, index, name))
+    return ballots
+
+
 # ---- The whole answer ------------------------------------------------------------------------------------------------
 
 
@@ -271,14 +290,12 @@ def decide(records: dict[str, Record]) -> Consensus:
     asn = _vote([(s, r.asn, r.asn) for s, r in answered.items() if r.asn], "asn")
     out.asn = settle("asn", asn)
     owners = {s: r for s, r in answered.items() if out.asn is None or r.asn in (None, out.asn)}
-    organization = _vote(
-        [
-            (s, organization_key(r.organization), r.organization)
-            for s, r in owners.items()
-            if r.organization and organization_key(r.organization)
-        ],
-        "organization",
-    )
+    names = [
+        (s, r.organization)
+        for s, r in sorted(owners.items(), key=lambda item: _rank(item[0]))
+        if r.organization and organization_key(r.organization)
+    ]
+    organization = _vote(_same_organization(names), "organization")
     out.organization = settle("organization", organization)
 
     # the network the winner's own record covers: from the first source that agrees on the AS number and has one

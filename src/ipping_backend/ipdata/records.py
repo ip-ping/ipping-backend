@@ -162,8 +162,17 @@ def fold(value: str) -> str:
     return "".join(c for c in stripped.casefold() if c.isalnum())
 
 
-def organization_key(value: str) -> str:
-    """The name of a network with its corporate suffixes gone: `Google LLC` and `GOOGLE` are one organization."""
-    words = [w for w in re.split(r"[^\w]+", unicodedata.normalize("NFKD", value).casefold()) if w]
+def organization_words(value: str) -> frozenset[str]:
+    """The distinct words of a network's name without its corporate suffixes: `Google LLC` and `GOOGLE` are both {google}."""
+    words = [
+        fold(w)
+        for w in re.split(r"[^\w]+", unicodedata.normalize("NFKD", value).casefold())
+        if fold(w)
+    ]
     kept = [w for w in words if w not in _ORGANIZATION_NOISE] or words
-    return fold(" ".join(kept))
+    return frozenset(kept)
+
+
+def organization_key(value: str) -> str:
+    """One string for the words of a network's name: equal for names that differ only in case, suffixes and repeats."""
+    return "".join(sorted(organization_words(value)))
