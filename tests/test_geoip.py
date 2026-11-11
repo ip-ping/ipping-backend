@@ -1,4 +1,4 @@
-"""The optional GeoIP / ASN cross-check: reading the databases, ruling places out, the API, the updater."""
+"""MaxMind-format databases on disk and the cross-check built on the IP data: reading the files, ruling places out, the API, the updater."""
 
 from __future__ import annotations
 
@@ -15,6 +15,8 @@ from netaddr import IPSet
 
 from ipping_backend.geolocation.geoip import GeoIp, GeoPlace, rule_out
 from ipping_backend.geolocation.update import check_database, fetch, months, update
+from ipping_backend.ipdata.schemas import IpInfoOut
+from ipping_backend.ipdata.service import IpDataService, place_of
 
 from .conftest import Api
 from .test_location_api import SITES, answer, close, fleet
@@ -60,61 +62,74 @@ def asn_db(path: Path) -> Path:
 # ---------------------------------------------------------------------------------------------
 
 
+def service_over(geoip: GeoIp) -> IpDataService:
+    """The IP data service with these MaxMind-format files as its only data (it finds them again on every lookup)."""
+    return IpDataService(lambda: geoip, None)
+
+
+def ask(geoip: GeoIp, address: str = TARGET) -> IpInfoOut:
+    return service_over(geoip).lookup(address)
+
+
 def test_a_place_and_a_network_are_read(tmp_path: Path) -> None:
     geoip = GeoIp(
         city_db(tmp_path / "dbip-city-lite-2026-11.mmdb"), asn_db(tmp_path / "dbip-asn-lite.mmdb")
     )
-    assert geoip.place(TARGET) == GeoPlace("Tokyo", "JP", 35.68, 139.69)
-    asn = geoip.asn(TARGET)
-    assert asn is not None and (asn.number, asn.organization) == (15133, "Edgecast")
-    assert geoip.place("1.1.1.1") is None and geoip.asn("1.1.1.1") is None
-    assert geoip.place("not an address") is None
-    assert geoip.has_city and geoip.has_asn
-    assert geoip.source == "DB-IP Lite" and "DB-IP" in (geoip.attribution or "")
+    service = service_over(geoip)
+    info = service.lookup(TARGET)
+    assert place_of(info) == GeoPlace("Tokyo", "JP", 35.68, 139.69)
+    assert (info.asn, info.organization) == (15133, "Edgecast")
+    assert not service.lookup("1.1.1.1").found
+    with pytest.raises(ValueError):
+        service.lookup("not an address")
+    assert service.can("position") and service.can("asn")
+    assert info.source == "DB-IP Lite" and "DB-IP" in (info.attribution or "")
 
 
 def test_nothing_configured_or_missing_files_are_harmless(tmp_path: Path) -> None:
     for geoip in (GeoIp(), GeoIp(tmp_path / "missing-city.mmdb", tmp_path / "missing-asn.mmdb")):
-        assert not geoip.has_city and not geoip.has_asn and geoip.attribution is None
-        assert geoip.place(TARGET) is None and geoip.asn(TARGET) is None
+        service = service_over(geoip)
+        assert not service.available() and not service.can("position") and not service.can("asn")
+        info = service.lookup(TARGET)
+        assert not info.found and info.attribution is None and place_of(info) is None
 
 
 def test_a_file_that_is_not_a_database_is_ignored(tmp_path: Path) -> None:
     junk = tmp_path / "junk-city.mmdb"
     junk.write_bytes(b"this is not a MaxMind database")
-    assert GeoIp(junk).place(TARGET) is None
+    assert not ask(GeoIp(junk)).found
 
 
 def test_a_replaced_file_is_picked_up_without_a_restart(tmp_path: Path) -> None:
     path = city_db(tmp_path / "city.mmdb", TOKYO)
     geoip = GeoIp(path)
-    assert geoip.place(TARGET).name == "Tokyo"  # type: ignore[union-attr]
+    assert ask(geoip).city == "Tokyo"
     city_db(tmp_path / "next.mmdb", AMSTERDAM).replace(path)
     os.utime(path, ns=(2_000_000_000_000_000_000, 2_000_000_000_000_000_000))
-    assert geoip.place(TARGET).name == "Amsterdam"  # type: ignore[union-attr]
+    assert ask(geoip).city == "Amsterdam"
 
 
 def test_databases_that_appear_after_the_server_started_are_found(tmp_path: Path) -> None:
     """The installer downloads them into a running server's directory: no restart should be needed."""
     geoip = GeoIp.from_settings(str(tmp_path), None, None)
-    assert not geoip.has_city and not geoip.has_asn and geoip.place(TARGET) is None
+    assert not service_over(geoip).can("position") and not ask(geoip).found
     city_db(tmp_path / "dbip-city-lite-2026-11.mmdb", TOKYO)
     asn_db(tmp_path / "dbip-asn-lite-2026-11.mmdb")
     fast = GeoIp(directory=tmp_path, scan_every_s=0)  # a scan on every lookup, for the test
-    assert fast.has_city and fast.has_asn
-    assert fast.place(TARGET).name == "Tokyo"  # type: ignore[union-attr]
+    assert service_over(fast).can("position") and service_over(fast).can("asn")
+    assert ask(fast).city == "Tokyo"
     # and a newer month's file replaces them
     newer = city_db(tmp_path / "dbip-city-lite-2026-12.mmdb", AMSTERDAM)
     os.utime(newer, ns=(2_000_000_000_000_000_000, 2_000_000_000_000_000_000))
-    assert fast.place(TARGET).name == "Amsterdam"  # type: ignore[union-attr]
+    assert ask(fast).city == "Amsterdam"
 
 
 def test_the_directory_is_not_scanned_on_every_lookup(tmp_path: Path) -> None:
     geoip = GeoIp.from_settings(str(tmp_path), None, None)
-    assert geoip.place(TARGET) is None
+    assert not ask(geoip).found
     city_db(tmp_path / "dbip-city-lite.mmdb", TOKYO)
     # ten seconds have not passed: the scan that found nothing is not repeated yet
-    assert geoip.place(TARGET) is None
+    assert not ask(geoip).found
 
 
 def test_a_directory_uses_the_newest_files_in_it(tmp_path: Path) -> None:
@@ -122,10 +137,22 @@ def test_a_directory_uses_the_newest_files_in_it(tmp_path: Path) -> None:
     os.utime(old, (1_000_000_000, 1_000_000_000))
     city_db(tmp_path / "dbip-city-lite-2026-11.mmdb", TOKYO)
     geoip = GeoIp.from_settings(str(tmp_path), None, None)
-    assert geoip.place(TARGET).name == "Tokyo"  # type: ignore[union-attr]
-    assert not geoip.has_asn
+    assert ask(geoip).city == "Tokyo"
+    assert not service_over(geoip).can("asn")
     explicit = GeoIp.from_settings(str(tmp_path), str(old), None)
-    assert explicit.place(TARGET).name == "Amsterdam"  # type: ignore[union-attr]
+    assert ask(explicit).city == "Amsterdam"
+
+
+def test_files_of_the_other_sources_are_not_taken_for_maxmind_ones(tmp_path: Path) -> None:
+    """IPLocate's and IPinfo's databases have `country` and `asn` in their names and a layout of their own."""
+    geoip = GeoIp(directory=tmp_path, scan_every_s=0)
+    for name in ("iplocate-country.mmdb", "iplocate-asn.mmdb", "ipinfo-lite.mmdb"):
+        make_db(tmp_path / name, "City", {"93.184.216.0/24": TOKYO})
+    assert (
+        geoip.flavoured("maxmind", "country") is None and geoip.flavoured("maxmind", "asn") is None
+    )
+    assert geoip.flavoured("dbip", "country") is None
+    assert not ask(geoip).found
 
 
 # ---------------------------------------------------------------------------------------------
@@ -271,7 +298,7 @@ def test_the_updater_downloads_checks_and_replaces(tmp_path: Path) -> None:
     assert any("2026-11" in u for u in asked) and all(
         u.startswith("https://download.db-ip.com/") for u in asked
     )
-    assert GeoIp(target / "dbip-city-lite-2026-10.mmdb").place(TARGET).name == "Tokyo"  # type: ignore[union-attr]
+    assert ask(GeoIp(target / "dbip-city-lite-2026-10.mmdb")).city == "Tokyo"
 
 
 def test_a_broken_or_wrong_download_changes_nothing(tmp_path: Path) -> None:

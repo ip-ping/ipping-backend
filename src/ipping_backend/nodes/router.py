@@ -130,7 +130,7 @@ async def enroll(body: EnrollRequest, request: Request, db: Db) -> EnrollRespons
     )
     db.add(node)
     # what the node did not say about itself is filled in from the address it came from (see nodes/autofill.py)
-    await fill_if_enabled(db, node, request.app.state.geoip)
+    await fill_if_enabled(db, node, request.app.state.ipdata)
     db.add(
         AuditEvent(
             actor=f"node:{node_id}",
@@ -260,7 +260,7 @@ async def connect(websocket: WebSocket) -> None:
             row.capabilities = hello.capabilities.model_dump()
             row.last_seen_at = utcnow()
             row.remote_addr = websocket.client.host if websocket.client else None
-            await fill_if_enabled(db, row, state.geoip)
+            await fill_if_enabled(db, row, state.ipdata)
             node_status = row.status
             await db.commit()
         else:

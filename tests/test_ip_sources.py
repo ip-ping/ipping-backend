@@ -1,4 +1,4 @@
-"""The IP data sources and their vote: the records, the voting rules, the readers, and each source's way of answering."""
+"""The IP data sources and their vote: the records, the voting rules, and the readers of each source's file."""
 
 from __future__ import annotations
 
@@ -8,11 +8,14 @@ import socket
 import struct
 import tarfile
 from pathlib import Path
+from typing import Any
 
 import pytest
 
-from ipping_backend.ipdata import online, records
+from ipping_backend.geolocation.geoip import GeoIp
+from ipping_backend.ipdata import records
 from ipping_backend.ipdata.consensus import RELIABILITY, decide, reliability
+from ipping_backend.ipdata.local import LocalSources, ipinfo_record, iplocate_record
 from ipping_backend.ipdata.ranges import (
     RangeDb,
     as_record,
@@ -22,6 +25,8 @@ from ipping_backend.ipdata.ranges import (
 )
 from ipping_backend.ipdata.records import Record
 from ipping_backend.ipdata.xdb import XdbError, XdbFile, read_header, record_of
+
+from .test_geoip import make_db
 
 R = Record
 
@@ -497,97 +502,115 @@ def test_a_replaced_xdb_file_is_read_again(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------------------------
-# The four online services' answers (the real shapes, captured for 8.8.8.8)
+# IPLocate and IPinfo Lite: database files with a layout of their own (the records of the real files, for 8.8.8.8 and 1.1.1.1)
 # ---------------------------------------------------------------------------------------------
 
-IPINFO = {
-    "ip": "8.8.8.8", "hostname": "dns.google", "city": "Mountain View", "region": "California", "country": "US",
-    "loc": "37.4056,-122.0775", "org": "AS15169 Google LLC", "postal": "94043", "timezone": "America/Los_Angeles",
-    "anycast": True,
-}  # fmt: skip
-IPLOCATE = {
-    "ip": "8.8.8.8", "country": "United States", "country_code": "US", "city": "Mountain View", "continent": "North America",
-    "latitude": 37.38605, "longitude": -122.08385, "time_zone": "America/Los_Angeles", "postal_code": "94035",
-    "subdivision": "California",
-    "asn": {"asn": "AS15169", "route": "8.8.8.0/24", "netname": "GOOGLE", "name": "Google LLC", "country_code": "US"},
-    "company": {"name": "Google LLC", "domain": "google.com"},
-}  # fmt: skip
-IPAPI_FREE = {
-    "ip": "8.8.8.8", "is_bogon": False, "company": "Google LLC", "asn": "AS15169 Google LLC", "city": "Mountain View",
-    "region": "California", "country": "United States", "lat": 37.38605, "lon": -122.08385, "timezone": "America/Los_Angeles",
-}  # fmt: skip
-IPAPI_KEYED = {
-    "ip": "8.8.8.8", "is_bogon": False, "company": {"name": "Google LLC", "type": "hosting"},
-    "asn": {"asn": 15169, "route": "8.8.8.0/24", "descr": "GOOGLE", "org": "Google LLC", "country": "us"},
-    "location": {
-        "country": "United States", "country_code": "US", "state": "California", "city": "Mountain View",
-        "latitude": 37.38605, "longitude": -122.08385, "zip": "94043", "timezone": "America/Los_Angeles",
+IPLOCATE_COUNTRY: dict[str, dict[str, Any]] = {
+    "8.8.8.0/24": {"continent_code": "NA", "country_code": "US", "country_name": "United States"},
+    "114.114.114.0/24": {"continent_code": "AS", "country_code": "CN", "country_name": "China"},
+}
+IPLOCATE_ASN: dict[str, dict[str, Any]] = {
+    "8.8.8.0/24": {
+        "asn": "15169",
+        "country_code": "US",
+        "domain": "google.com",
+        "name": "GOOGLE",
+        "network": "8.8.8.0/24",
+        "org": "Google LLC",
     },
-}  # fmt: skip
-IP2LOCATION = {
-    "ip": "8.8.8.8", "country_code": "US", "country_name": "United States of America", "region_name": "California",
-    "city_name": "Mountain View", "latitude": 37.38605, "longitude": -122.08385, "zip_code": "94043",
-    "time_zone": "-08:00", "asn": "15169", "as": "Google LLC", "is_proxy": False,
-}  # fmt: skip
+    "114.114.114.0/24": {
+        "asn": "137702",
+        "country_code": "DE",  # the network's own country, not where the address is
+        "domain": "chinatelecom.cn",
+        "name": "CHINATELECOM-JIANGSU-NANJING-IDC",
+        "network": "not a network",
+    },
+}
+IPINFO_LITE: dict[str, dict[str, Any]] = {
+    "1.1.1.0/24": {
+        "as_domain": "cloudflare.com",
+        "as_name": "Cloudflare, Inc.",
+        "asn": "AS13335",
+        "continent": "Oceania",
+        "continent_code": "OC",
+        "country": "Australia",
+        "country_code": "AU",
+    },
+    "9.9.9.0/24": {"asn": "AS19281", "as_name": "Quad9", "country": "Switzerland"},
+}
 
 
-def test_every_online_service_answer_is_read() -> None:
-    expected = {
-        "ipinfo": IPINFO,
-        "iplocate": IPLOCATE,
-        "ipapi_is": IPAPI_FREE,
-        "ip2location": IP2LOCATION,
-    }
-    for source, body in expected.items():
-        record = online.SOURCES[source].parse(body)
-        assert (record.country, record.region, record.city) == (
-            "US",
-            "California",
-            "Mountain View",
-        ), source
-        assert (record.asn, record.organization) == (15169, "Google LLC"), source
-        assert record.latitude is not None and abs(record.latitude - 37.4) < 0.1, source
+def _database(tmp_path: Path, name: str, records_: dict[str, dict[str, Any]]) -> GeoIp:
+    make_db(tmp_path / name, "City", records_)
+    return GeoIp(directory=tmp_path)
 
 
-def test_the_details_that_differ_between_services() -> None:
-    assert online.SOURCES["ipinfo"].parse(IPINFO).time_zone == "America/Los_Angeles"
-    assert online.SOURCES["ipinfo"].parse(IPINFO).postal_code == "94043"
-    assert online.SOURCES["iplocate"].parse(IPLOCATE).network == "8.8.8.0/24"
-    assert (
-        online.SOURCES["ip2location"].parse(IP2LOCATION).time_zone is None
-    )  # an offset is not a zone
-    keyed = online.SOURCES["ipapi_is"].parse(IPAPI_KEYED)
-    assert (keyed.country, keyed.region, keyed.postal_code, keyed.asn, keyed.organization) == (
-        "US", "California", "94043", 15169, "Google LLC",
-    )  # fmt: skip
-    assert keyed.network == "8.8.8.0/24" and keyed.time_zone == "America/Los_Angeles"
-    free = online.SOURCES["ipapi_is"].parse(IPAPI_FREE)
-    assert (
-        free.country == "US" and free.postal_code is None
-    )  # the free answer names the country in full
-
-
-def test_an_online_answer_with_nothing_in_it_is_empty() -> None:
-    assert online.SOURCES["ipinfo"].parse({"ip": "10.0.0.1", "bogon": True}).empty()
-    assert online.SOURCES["ipapi_is"].parse({"ip": "10.0.0.1", "is_bogon": True}).empty()
-    assert online.SOURCES["ip2location"].parse({"error": {"error_code": 10001}}).empty()
-    assert online.SOURCES["iplocate"].parse({}).empty()
-    assert online.SOURCES["ipinfo"].parse({"country": "ZZ", "loc": "0,0", "org": "0"}).empty()
-
-
-def test_a_key_goes_where_the_service_wants_it() -> None:
-    url, headers, params = online.SOURCES["ipinfo"].request("8.8.8.8", {"token": "abc"})
-    assert (
-        url == "https://ipinfo.io/8.8.8.8/json"
-        and params == {"token": "abc"}
-        and "abc" not in str(headers)
+def test_iplocate_two_databases_are_one_record(tmp_path: Path) -> None:
+    _database(tmp_path, "iplocate-country.mmdb", IPLOCATE_COUNTRY)
+    _database(tmp_path, "iplocate-asn.mmdb", IPLOCATE_ASN)
+    reading = LocalSources(lambda: GeoIp(directory=tmp_path), tmp_path)
+    assert reading.lookup("iplocate", "8.8.8.8") == R(
+        country="US", asn=15169, organization="Google LLC", network="8.8.8.0/24"
     )
-    url, headers, params = online.SOURCES["iplocate"].request("8.8.8.8", {"api_key": "k1"})
-    assert headers["X-API-Key"] == "k1" and params == {}
-    url, headers, params = online.SOURCES["ipapi_is"].request("8.8.8.8", {"api_key": "k2"})
-    assert params == {"q": "8.8.8.8", "key": "k2"}
-    url, headers, params = online.SOURCES["ip2location"].request("8.8.8.8", {"api_key": "k3"})
-    assert params["key"] == "k3" and params["ip"] == "8.8.8.8"
-    for source in online.SOURCES.values():  # and none without one
-        _, headers, params = source.request("8.8.8.8", {})
-        assert "key" not in params and "token" not in params and "X-API-Key" not in headers
+    # the country comes from the country database only: the ASN database's is the network's own
+    chinese = reading.lookup("iplocate", "114.114.114.114")
+    assert chinese == R(country="CN", asn=137702, organization="CHINATELECOM-JIANGSU-NANJING-IDC")
+    assert reading.lookup("iplocate", "1.2.3.4") is None
+    assert reading.present("iplocate") and [f["name"] for f in reading.files("iplocate")] == [
+        "iplocate-country.mmdb",
+        "iplocate-asn.mmdb",
+    ]
+    assert reading.knows("iplocate") == {"country", "asn", "organization"}
+
+
+def test_iplocate_with_one_of_its_two_databases_still_answers_what_it_has(tmp_path: Path) -> None:
+    _database(tmp_path, "iplocate-asn.mmdb", IPLOCATE_ASN)
+    reading = LocalSources(lambda: GeoIp(directory=tmp_path), tmp_path)
+    assert reading.lookup("iplocate", "8.8.8.8") == R(
+        asn=15169, organization="Google LLC", network="8.8.8.0/24"
+    )
+    assert reading.knows("iplocate") == {"asn", "organization"}
+    other = tmp_path / "other"
+    other.mkdir()
+    _database(other, "iplocate-country.mmdb", IPLOCATE_COUNTRY)
+    only_country = LocalSources(lambda: GeoIp(directory=other), other)
+    assert only_country.lookup("iplocate", "8.8.8.8") == R(country="US")
+    assert only_country.knows("iplocate") == {"country"}
+
+
+def test_ipinfo_lite_is_one_record(tmp_path: Path) -> None:
+    _database(tmp_path, "ipinfo-lite.mmdb", IPINFO_LITE)
+    reading = LocalSources(lambda: GeoIp(directory=tmp_path), tmp_path)
+    assert reading.lookup("ipinfo", "1.1.1.1") == R(
+        country="AU", asn=13335, organization="Cloudflare, Inc.", network="1.1.1.0/24"
+    )
+    # a record with only a country's name still has its country
+    assert reading.lookup("ipinfo", "9.9.9.9") == R(
+        country="CH", asn=19281, organization="Quad9", network="9.9.9.0/24"
+    )
+    assert reading.lookup("ipinfo", "8.8.8.8") is None
+    assert reading.knows("ipinfo") == {"country", "asn", "organization"}
+
+
+def test_nothing_on_disk_means_nothing_known(tmp_path: Path) -> None:
+    reading = LocalSources(lambda: GeoIp(directory=tmp_path), tmp_path)
+    for source in (
+        "maxmind",
+        "dbip",
+        "ipinfo",
+        "iplocate",
+        "ipapi_is",
+        "ip2location",
+        "iptoasn",
+        "ipdeny",
+        "ip2region",
+    ):
+        assert reading.lookup(source, "8.8.8.8") is None
+        assert not reading.present(source) and reading.knows(source) == frozenset()
+    nowhere = LocalSources(lambda: GeoIp(), None)
+    assert nowhere.lookup("ipinfo", "1.1.1.1") is None and not nowhere.present("iplocate")
+
+
+def test_the_two_database_readers_tolerate_nothing_to_read() -> None:
+    assert iplocate_record(None, None, "8.8.8.8") is None
+    assert ipinfo_record(None, "8.8.8.8") is None

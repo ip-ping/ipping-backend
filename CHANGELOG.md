@@ -2,6 +2,51 @@
 
 Progress log for `ipping-backend`, newest first. Each entry is one small, tested step.
 
+## v0.13.0 (unreleased)
+
+Every IP data source is a database that is downloaded and served from disk, and all nine are treated the same. No database change (still `0013`).
+
+- **No source's API is called any more.** IPinfo, IPLocate, ipapi.is and IP2Location were asked over HTTPS on every lookup (v0.12.0). They are
+  now their free downloadable databases, kept on disk like the other five: **IPinfo Lite** (`ipinfo_lite.mmdb`, a free account's token, checked
+  against IPinfo's published checksum, which does not count against its ten downloads a day), **IPLocate** (its free country and ASN `.mmdb` files
+  on GitHub, no account), **ipapi.is** (its free geolocation CSV zips, no account) and **IP2Location LITE** (DB11 CSV zips, a free account's
+  download token, downloaded once a month as IP2Location asks). A lookup reads files and never touches the network (a test makes any connection
+  an error). The online client, its 24 hour cache, its rate-limit pause and the `online` kind are gone.
+- **MaxMind is one source among nine.** Its separate updater, status file, settings (`maxmind_editions`, `maxmind_auto_update`,
+  `maxmind_update_hours`) and its block in the admin API are gone: the same downloader fetches City and ASN (a free `Last-Modified` question first,
+  the archive's SHA-256 checked, an hour after a failure and six after a refused key, as before), its account ID and license key are that source's
+  credentials like any other source's key, and `IPPING_MAXMIND_ACCOUNT_ID` / `IPPING_MAXMIND_LICENSE_KEY` still win and are shown as coming from
+  the environment. An account saved by an earlier version is read from where it was and moved with the other keys the first time any credential
+  changes. Files that an earlier version downloaded are not downloaded again: their age says whether MaxMind has something newer.
+- **Nothing prefers a source any more.** The cross-check of a place against the measurements, the networks and places of a traceroute and a node's
+  own details used "the newest `GeoLite2` file, else DB-IP's": they now use the same vote as the lookup API, so what any source says counts
+  everywhere. `GeoIp` only finds the MaxMind-format files now (the IPLocate and IPinfo files, which have `country` and `asn` in their names and a layout
+  of their own, are never taken for MaxMind's).
+- **ipapi.is's ranges overlap**, which a table that answers "the last range starting at or before this address" cannot cope with (`1.0.4.0-1.0.4.255`
+  and `1.0.4.0-1.0.7.255` are both in the file, and 24 607 IPv4 ranges overlap only in part). The table is built flat, the narrowest range winning
+  (`ipdata/places.py`), with each place stored once. Checked against a brute-force scan of the real file for 3 287 addresses (no difference), against
+  a random brute-force oracle in the tests (and the tests fail when the rule is broken, which was tried), and with the file in order of start
+  or not. Built in 17 seconds from the real 66 MB and 8 MB zips, a table of 109 MB, 120 MB peak memory.
+- **The admin API changes shape** (the web interface of ipping v0.16.0 follows it): `GET /api/v1/admin/ip-data` has no `maxmind` block, no
+  `databases`, `source` or `attribution`; every source in `sources` has `credentials` (with `from_environment`), `files`, `running`, `last_attempt`,
+  `last_success`, `next_check` and `error`, and there is a top-level `directory_configured`. `PUT` takes `data_update_hours` and `sources: {id: {enabled,
+  credentials}}` only (MaxMind's are `account_id` and `license_key` there). `POST .../update` is now **check for newer files** (a source is downloaded only
+  if it has something newer, so repeated clicks cost nothing and cannot use up MaxMind's 30 downloads a day) and answers 409 `nothing_to_update` when no source that
+  is on can be downloaded yet. In an answer, `kind` is gone and `rate_limited` is not a status any more.
+- **A token cannot reach a log.** IPinfo's and IP2Location's downloads carry the token in the URL, and httpx writes the URL of every request
+  at INFO, which is the server's level: `httpx` and `httpcore` are now kept at WARNING (tested with a control that shows the token *would* be
+  logged otherwise), and failures are reported by what kind they were, never by the library's text. **This also applies to v0.12.0**, whose
+  four online sources sent their optional keys as URL parameters: a server that ran v0.12.0 with such a key set has it in its logs, and the key
+  should be replaced.
+- **Tested** (571 tests, 583 on PostgreSQL; the IP data tests were rewritten around local files for this): the downloaders against pretend servers (IPinfo's checksum and redirect, the
+  token reaching only IPinfo, IP2Location's refusal as text with status 200, its once-a-month rule, a download that does not match its checksum or is
+  the wrong kind replacing nothing, one of two files failing without losing the other, nothing left behind, offline, a source that needs a key not being
+  downloaded without it), the readers of the real layouts of IPLocate and IPinfo, the place tables, and the admin API. **Run against the real
+  servers**: DB-IP, IPLocate, ipapi.is, IPtoASN, IPdeny and ip2region downloaded, checked and built in 41 seconds (142 MB peak memory, 425 MB on disk),
+  and voted on for 8.8.8.8, 1.1.1.1, 114.114.114.114, `2001:4860:4860::8888` and 223.5.5.5 in 1 to 6 ms each. **Not run against the real
+  service**: MaxMind, IPinfo Lite and IP2Location LITE, which need an account (no account was used): IPinfo's and IP2Location's request shapes
+  are from their documentation, and IPinfo's file layout from its published sample.
+
 ## v0.12.0 (2026-11-11)
 
 Nine IP data sources, each with a switch, and a majority vote with a percentage for every field. No database change (still `0013`: the

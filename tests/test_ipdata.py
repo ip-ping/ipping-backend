@@ -1,4 +1,4 @@
-"""IP data in the admin page and the API: the MaxMind account, the lookup API, and nodes filled in from their address."""
+"""IP data in the admin page and the API: every source the same, the lookup API, and nodes filled in from their address."""
 
 from __future__ import annotations
 
@@ -11,13 +11,16 @@ from sqlalchemy import select, update
 
 from ipping_backend.config import Settings
 from ipping_backend.geolocation.geoip import GeoIp
-from ipping_backend.ipdata.updater import MaxMindUpdater
-from ipping_backend.models import Node
+from ipping_backend.ipdata import runtime
+from ipping_backend.ipdata.catalog import IDS
+from ipping_backend.ipdata.downloader import DataUpdater
+from ipping_backend.ipdata.service import IpDataService
+from ipping_backend.models import AppSetting, Node
 from ipping_backend.nodes.autofill import fill, refresh_all
 
 from .conftest import Api
 from .test_api_keys import _key
-from .test_geoip import asn_db, city_db
+from .test_geoip import asn_db, city_db, service_over
 from .test_maxmind import ACCOUNT, KEY, FakeMaxMind
 
 FRANKFURT = {
@@ -40,10 +43,11 @@ MADRID = {
 }
 PUBLIC = "93.184.216.34"
 ADMIN = "/api/v1/admin/ip-data"
+OTHERS = [source for source in IDS if source != "maxmind"]
 
 
 def _geoip(api: Api, directory: Path, place: dict[str, Any] = FRANKFURT) -> GeoIp:
-    """Databases in the directory, as the updater leaves them, and the app reading them."""
+    """Databases in the directory, as the downloader leaves them, and the app reading them."""
     directory.mkdir(parents=True, exist_ok=True)
     city_db(directory / "GeoLite2-City.mmdb", place)
     asn_db(directory / "GeoLite2-ASN.mmdb")
@@ -52,17 +56,39 @@ def _geoip(api: Api, directory: Path, place: dict[str, Any] = FRANKFURT) -> GeoI
     return geoip
 
 
-def _updater(api: Api, directory: Path, fake: FakeMaxMind | None = None) -> MaxMindUpdater:
-    """An updater (against the pretend MaxMind) for this directory, which the app reads its databases from."""
+def _updater(api: Api, directory: Path | None, fake: FakeMaxMind | None = None) -> DataUpdater:
+    """The app set up as it is with a data directory: a service and a downloader (against the pretend MaxMind) for it."""
     state = api.client.app.state  # type: ignore[attr-defined]
-    settings = Settings(geoip_dir=str(directory), database_url="sqlite+aiosqlite://")
-    state.geoip = GeoIp(directory=directory)
-    updater = MaxMindUpdater(
-        state.sessionmaker, settings, state.geoip, transport=fake.transport() if fake else None
+    settings = Settings(
+        geoip_dir=str(directory) if directory else None, database_url="sqlite+aiosqlite://"
     )
-    state.maxmind = updater
+    state.geoip = GeoIp(directory=directory)
     state.settings = settings
-    return updater
+    state.ipdata = IpDataService(lambda: state.geoip, directory)
+    state.dataupdater = DataUpdater(
+        state.sessionmaker,
+        settings,
+        directory,
+        lambda: state.geoip,
+        transport=fake.transport() if fake else None,
+    )
+    api.client.portal.call(runtime.reload, state)
+    return state.dataupdater  # type: ignore[no-any-return]
+
+
+def _only_maxmind(api: Api) -> None:
+    """Every other source off: a test of MaxMind's download talks to the pretend MaxMind only."""
+    body = {"sources": {source: {"enabled": False} for source in OTHERS}}
+    assert api.request("PUT", ADMIN, json=body).status_code == 200
+
+
+def _give_maxmind(api: Api, account: str = ACCOUNT, key: str = KEY) -> Any:
+    body = {"sources": {"maxmind": {"credentials": {"account_id": account, "license_key": key}}}}
+    return api.request("PUT", ADMIN, json=body)
+
+
+def _source(page: dict[str, Any], source: str) -> dict[str, Any]:
+    return next(s for s in page["sources"] if s["id"] == source)  # type: ignore[no-any-return]
 
 
 def _wait(api: Api, done: Any, timeout: float = 10.0) -> dict[str, Any]:
@@ -125,7 +151,7 @@ def test_without_a_database_the_lookup_says_how_to_get_one(api: Api, tmp_path: P
     api.client.app.state.geoip = GeoIp(directory=tmp_path / "none")  # type: ignore[attr-defined]
     response = api.get(f"/api/v1/ip/{PUBLIC}")
     assert response.status_code == 503 and response.json()["error"]["code"] == "no_database"
-    assert "MaxMind" in response.json()["error"]["message"]
+    assert "admin page" in response.json()["error"]["message"]
 
 
 def test_the_callers_own_address(api: Api, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -191,7 +217,7 @@ def test_lookups_are_limited_a_minute_for_everyone_but_administrators(
 
 
 # ---------------------------------------------------------------------------------------------
-# The admin page
+# The admin page: one list, every source the same
 # ---------------------------------------------------------------------------------------------
 
 
@@ -200,66 +226,90 @@ def test_the_page_starts_empty_and_asks_an_administrator(api: Api, tmp_path: Pat
     api.become_admin()
     _updater(api, tmp_path / "geoip")
     page = api.get(ADMIN).json()
-    assert (
-        page["maxmind"]["license_key_set"] is False
-        and page["maxmind"]["credentials_source"] == "none"
-    )
-    assert (
-        page["maxmind"]["editions"] == ["GeoLite2-City", "GeoLite2-ASN"]
-        and page["maxmind"]["auto_update"] is True
-    )
-    assert page["maxmind"]["directory_configured"] is True and page["maxmind"]["running"] is False
-    assert [d["edition"] for d in page["maxmind"]["databases"]] == [
-        "GeoLite2-City",
-        "GeoLite2-Country",
-        "GeoLite2-ASN",
-    ]
-    assert not any(d["present"] for d in page["maxmind"]["databases"])
+    assert "maxmind" not in page and "databases" not in page, "MaxMind has no block of its own"
+    assert [s["id"] for s in page["sources"]] == list(IDS)
+    assert all(s["enabled"] for s in page["sources"]), "all on by default"
+    assert all("kind" not in s for s in page["sources"]), "every source is a database"
     assert page["lookup"] == {"enabled": True, "access": "api_key", "per_minute": 60}
     assert page["node_autofill"] is True and page["databases_loaded"] is False
+    assert page["directory_configured"] is True and page["offline"] is False
+    assert page["data_update_hours"] == 24
+    # a source that needs an account says so, in the same way whichever it is
+    needs = {
+        s["id"]: [c["name"] for c in s["credentials"]] for s in page["sources"] if s["credentials"]
+    }
+    assert needs == {
+        "maxmind": ["account_id", "license_key"],
+        "ipinfo": ["token"],
+        "ip2location": ["download_token"],
+    }
+    for source in needs:
+        assert _source(page, source)["state"] == "needs_setup"
+        assert all(
+            c["set"] is False and c["required"] for c in _source(page, source)["credentials"]
+        )
+    for source in ("dbip", "iplocate", "ipapi_is", "iptoasn", "ipdeny", "ip2region"):
+        assert _source(page, source)["state"] == "waiting" and not _source(page, source)["files"]
 
 
-def test_the_license_key_is_kept_and_used_but_never_sent_back(api: Api, tmp_path: Path) -> None:
+def test_the_credentials_of_every_source_are_kept_and_used_but_never_sent_back(
+    api: Api, tmp_path: Path
+) -> None:
     api.become_admin()
     _updater(api, tmp_path / "geoip")
-    response = api.request(
-        "PUT", ADMIN, json={"account_id": ACCOUNT, "license_key": KEY, "maxmind_auto_update": False}
-    )
+    body = {
+        "sources": {
+            "maxmind": {"credentials": {"account_id": ACCOUNT, "license_key": KEY}},
+            "ipinfo": {"credentials": {"token": "ipinfo_token_1234567890"}},
+            "ip2location": {"credentials": {"download_token": "ip2location_token_1234567890"}},
+        }
+    }
+    response = api.request("PUT", ADMIN, json=body)
     assert response.status_code == 200
     page = response.json()
-    assert page["maxmind"]["account_id"] == ACCOUNT and page["maxmind"]["license_key_set"] is True
-    assert page["maxmind"]["credentials_source"] == "admin"
-    assert KEY not in response.text and KEY not in api.get(ADMIN).text
-    assert (
-        KEY not in api.get("/api/v1/admin/audit").text
-        and KEY not in api.get("/api/v1/admin/settings").text
-    )
-    # changing the account ID keeps the key; an empty key means "keep it"
-    page = api.request("PUT", ADMIN, json={"account_id": "654321", "license_key": ""}).json()
-    assert page["maxmind"]["account_id"] == "654321" and page["maxmind"]["license_key_set"] is True
-    # removing them
-    page = api.request("PUT", ADMIN, json={"clear_credentials": True}).json()
-    assert page["maxmind"] == {
-        **page["maxmind"],
-        "account_id": "",
-        "license_key_set": False,
-        "credentials_source": "none",
-    }
-    audit = api.get("/api/v1/admin/audit").json()
-    changed = [e for e in audit if e["action"] == "ip_data.updated"]
-    assert changed and all(KEY not in str(e) for e in changed)
+    mm = {c["name"]: c for c in _source(page, "maxmind")["credentials"]}
+    assert mm["account_id"]["set"] and mm["account_id"]["value"] == ACCOUNT  # not a secret
+    assert mm["license_key"]["set"] and mm["license_key"]["value"] is None
+    assert all(c["from_environment"] is False for c in mm.values())
+    assert _source(page, "ipinfo")["credentials"][0]["set"] is True
+    assert _source(page, "ip2location")["credentials"][0]["set"] is True
+    secrets = (KEY, "ipinfo_token_1234567890", "ip2location_token_1234567890")
+    for text in (response.text, api.get(ADMIN).text, api.get("/api/v1/admin/audit").text):
+        assert not any(secret in text for secret in secrets)
+    assert not any(secret in api.get("/api/v1/admin/settings").text for secret in secrets)
+    # changing the account ID keeps the key; an empty one clears it
+    page = api.request(
+        "PUT", ADMIN, json={"sources": {"maxmind": {"credentials": {"account_id": "654321"}}}}
+    ).json()
+    mm = {c["name"]: c for c in _source(page, "maxmind")["credentials"]}
+    assert mm["account_id"]["value"] == "654321" and mm["license_key"]["set"] is True
+    page = api.request(
+        "PUT",
+        ADMIN,
+        json={"sources": {"maxmind": {"credentials": {"account_id": "", "license_key": ""}}}},
+    ).json()
+    assert not any(c["set"] for c in _source(page, "maxmind")["credentials"])
+    assert _source(page, "ipinfo")["credentials"][0]["set"] is True  # the others are as they were
+    audit = [e for e in api.get("/api/v1/admin/audit").json() if e["action"] == "ip_data.updated"]
+    assert audit and all(not any(secret in str(e) for secret in secrets) for e in audit)
 
 
 def test_what_cannot_be_a_key_an_account_or_a_choice_is_refused(api: Api, tmp_path: Path) -> None:
     api.become_admin()
     _updater(api, tmp_path / "geoip")
+
+    def credential(source: str, **fields: str) -> dict[str, Any]:
+        return {"sources": {source: {"credentials": fields}}}
+
     for body in (
-        {"account_id": "my account"},
-        {"license_key": "short"},
-        {"license_key": "has spaces in it, so no no no no"},
-        {"maxmind_editions": []},
-        {"maxmind_editions": ["GeoIP2-City"]},
-        {"maxmind_update_hours": 1},
+        credential("maxmind", account_id="my account"),
+        credential("maxmind", license_key="short"),
+        credential("maxmind", license_key="has spaces in it, so no no no no"),
+        credential("ipinfo", token="has a space"),
+        credential("dbip", token="a source that takes no key"),
+        credential("ipinfo", api_key="not the name it takes"),
+        {"sources": {"nobody": {"enabled": True}}},
+        {"data_update_hours": 1},
         {"lookup_access": "everyone"},
         {"lookup_per_minute": 0},
     ):
@@ -268,20 +318,52 @@ def test_what_cannot_be_a_key_an_account_or_a_choice_is_refused(api: Api, tmp_pa
 
 def test_credentials_in_the_environment_win_over_the_page(api: Api, tmp_path: Path) -> None:
     api.become_admin()
-    updater = _updater(api, tmp_path / "geoip")
-    updater._settings = Settings(  # noqa: SLF001
+    _updater(api, tmp_path / "geoip")
+    api.client.app.state.settings = Settings(  # type: ignore[attr-defined]
         geoip_dir=str(tmp_path / "geoip"),
         maxmind_account_id="42",
         maxmind_license_key="envkey_envkey_envkey_1234",
     )
-    api.client.app.state.settings = updater._settings  # type: ignore[attr-defined]  # noqa: SLF001
-    page = api.get(ADMIN).json()["maxmind"]
-    assert (
-        page["credentials_source"] == "environment"
-        and page["account_id"] == "42"
-        and page["license_key_set"]
-    )
+    page = api.get(ADMIN).json()
+    mm = {c["name"]: c for c in _source(page, "maxmind")["credentials"]}
+    assert mm["account_id"]["value"] == "42" and mm["license_key"]["set"]
+    assert all(c["from_environment"] for c in mm.values())
+    assert not any(c["from_environment"] for c in _source(page, "ipinfo")["credentials"])
     assert "envkey" not in api.get(ADMIN).text
+
+
+def test_a_maxmind_account_saved_by_an_earlier_version_is_read_and_then_kept_with_the_others(
+    api: Api, tmp_path: Path
+) -> None:
+    api.become_admin()
+    _updater(api, tmp_path / "geoip")
+
+    async def legacy() -> None:
+        async with api.client.app.state.sessionmaker() as db:  # type: ignore[attr-defined]
+            db.add(
+                AppSetting(
+                    key="maxmind_credentials", value={"account_id": "777", "license_key": KEY}
+                )
+            )
+            await db.commit()
+
+    api.client.portal.call(legacy)
+    mm = {c["name"]: c for c in _source(api.get(ADMIN).json(), "maxmind")["credentials"]}
+    assert mm["account_id"]["value"] == "777" and mm["license_key"]["set"]
+
+    # any change to a credential moves the old one to where the others are kept
+    api.request("PUT", ADMIN, json={"sources": {"ipinfo": {"credentials": {"token": "abc12345"}}}})
+
+    async def where() -> tuple[bool, bool]:
+        async with api.client.app.state.sessionmaker() as db:  # type: ignore[attr-defined]
+            return (
+                await db.get(AppSetting, "maxmind_credentials") is not None,
+                await db.get(AppSetting, "ip_data_keys") is not None,
+            )
+
+    assert api.client.portal.call(where) == (False, True)
+    mm = {c["name"]: c for c in _source(api.get(ADMIN).json(), "maxmind")["credentials"]}
+    assert mm["account_id"]["value"] == "777" and mm["license_key"]["set"]
 
 
 def test_update_now_downloads_in_the_background_and_the_page_shows_how_it_went(
@@ -292,24 +374,20 @@ def test_update_now_downloads_in_the_background_and_the_page_shows_how_it_went(
     directory = tmp_path / "geoip"
     directory.mkdir()
     _updater(api, directory, fake)
+    _only_maxmind(api)
     none = api.post(f"{ADMIN}/update")
-    assert none.status_code == 409 and none.json()["error"]["code"] == "no_credentials"
-    api.request(
-        "PUT", ADMIN, json={"account_id": ACCOUNT, "license_key": KEY, "maxmind_auto_update": False}
+    assert none.status_code == 409 and none.json()["error"]["code"] == "nothing_to_update"
+    assert _give_maxmind(api).status_code == 200  # giving the account starts the download too
+    assert api.post(f"{ADMIN}/update").status_code == 202  # also while a check is going
+    page = _wait(
+        api,
+        lambda d: not _source(d, "maxmind")["running"] and _source(d, "maxmind")["last_success"],
     )
-    assert api.post(f"{ADMIN}/update").status_code == 202
-    page = _wait(api, lambda d: not d["maxmind"]["running"] and d["maxmind"]["last_success"])
-    assert (
-        page["maxmind"]["error"] is None
-        and page["databases_loaded"]
-        and page["source"] == "MaxMind GeoLite2"
-    )
-    present = {d["edition"]: d for d in page["maxmind"]["databases"] if d["present"]}
-    assert sorted(present) == ["GeoLite2-ASN", "GeoLite2-City"]
-    assert all(
-        d["built"] and d["size"] and d["downloaded_at"] and d["error"] is None
-        for d in present.values()
-    )
+    mm = _source(page, "maxmind")
+    assert mm["error"] is None and page["databases_loaded"] and mm["state"] == "ready"
+    assert sorted(f["name"] for f in mm["files"]) == ["GeoLite2-ASN.mmdb", "GeoLite2-City.mmdb"]
+    assert all(f["built"] and f["size"] for f in mm["files"])
+    assert mm["next_check"], "when it is looked at again"
     api.request("PUT", ADMIN, json={"lookup_access": "public"})
     assert api.get(f"/api/v1/ip/{PUBLIC}").json()["found"]  # used at once, without a restart
 
@@ -320,9 +398,24 @@ def test_a_key_that_is_given_starts_a_download_by_itself(api: Api, tmp_path: Pat
     directory = tmp_path / "geoip"
     directory.mkdir()
     _updater(api, directory, fake)
-    api.request("PUT", ADMIN, json={"account_id": ACCOUNT, "license_key": KEY})
+    _only_maxmind(api)
+    _give_maxmind(api)
     page = _wait(api, lambda d: d["databases_loaded"])
-    assert page["maxmind"]["last_success"]
+    assert _source(page, "maxmind")["last_success"]
+
+
+def test_turning_a_source_on_starts_its_download_by_itself(api: Api, tmp_path: Path) -> None:
+    api.become_admin()
+    fake = FakeMaxMind(tmp_path)
+    directory = tmp_path / "geoip"
+    directory.mkdir()
+    _updater(api, directory, fake)
+    _only_maxmind(api)
+    api.request("PUT", ADMIN, json={"sources": {"maxmind": {"enabled": False}}})
+    _give_maxmind(api)
+    assert not api.get(ADMIN).json()["databases_loaded"]
+    api.request("PUT", ADMIN, json={"sources": {"maxmind": {"enabled": True}}})
+    _wait(api, lambda d: d["databases_loaded"])
 
 
 def test_a_refused_key_is_shown_on_the_page(api: Api, tmp_path: Path) -> None:
@@ -331,26 +424,35 @@ def test_a_refused_key_is_shown_on_the_page(api: Api, tmp_path: Path) -> None:
     directory = tmp_path / "geoip"
     directory.mkdir()
     _updater(api, directory, fake)
-    api.request(
-        "PUT", ADMIN, json={"account_id": ACCOUNT, "license_key": "wrongwrongwrongwrong1234"}
-    )
-    page = _wait(api, lambda d: d["maxmind"]["error"])
-    assert page["maxmind"]["error"]["code"] == "refused" and "wrongwrong" not in api.get(ADMIN).text
-    assert page["maxmind"]["next_check"] and not page["databases_loaded"]
+    _only_maxmind(api)
+    _give_maxmind(api, key="wrongwrongwrongwrong1234")
+    page = _wait(api, lambda d: _source(d, "maxmind")["error"])
+    mm = _source(page, "maxmind")
+    assert "MaxMind refused" in mm["error"] and "wrongwrong" not in api.get(ADMIN).text
+    assert mm["next_check"] and not page["databases_loaded"]
 
 
 def test_there_is_nowhere_to_download_to_without_a_directory(api: Api) -> None:
     api.become_admin()
-    state = api.client.app.state  # type: ignore[attr-defined]
-    state.maxmind = MaxMindUpdater(
-        state.sessionmaker, Settings(database_url="sqlite+aiosqlite://"), state.geoip
-    )
-    api.request(
-        "PUT", ADMIN, json={"account_id": ACCOUNT, "license_key": KEY, "maxmind_auto_update": False}
-    )
+    _updater(api, None)
+    _give_maxmind(api)
+    page = api.get(ADMIN).json()
+    assert page["directory_configured"] is False
+    assert _source(page, "maxmind")["state"] == "no_directory"
     response = api.post(f"{ADMIN}/update")
     assert response.status_code == 409 and response.json()["error"]["code"] == "no_directory"
-    assert api.get(ADMIN).json()["maxmind"]["directory_configured"] is False
+
+
+def test_nothing_is_downloaded_in_offline_mode(api: Api, tmp_path: Path) -> None:
+    api.become_admin()
+    updater = _updater(api, tmp_path / "geoip")
+    updater.offline = True
+    api.client.app.state.ipdata.offline = True  # type: ignore[attr-defined]
+    page = api.get(ADMIN).json()
+    assert page["offline"] is True and _source(page, "dbip")["state"] == "offline"
+    response = api.post(f"{ADMIN}/update")
+    assert response.status_code == 409 and response.json()["error"]["code"] == "offline"
+    assert _source(page, "dbip")["next_check"] is None
 
 
 # ---------------------------------------------------------------------------------------------
@@ -584,7 +686,7 @@ def test_a_node_is_filled_in_when_it_enrolls_and_when_the_data_changes(
     # the database is replaced by a newer one: every automatic field follows, at once
     state = api.client.app.state  # type: ignore[attr-defined]
     state.geoip = GeoIp(directory=_geoip_dir(tmp_path / "newer", MADRID))
-    assert api.client.portal.call(refresh_all, state.sessionmaker, state.geoip) == 1
+    assert api.client.portal.call(refresh_all, state.sessionmaker, state.ipdata) == 1
     after = _admin_node(api, node)
     assert (after["country"], after["city"]) == ("ES", "Madrid") and after["asn"] == 15133
 
@@ -605,7 +707,7 @@ def test_turning_auto_fill_off_leaves_nodes_alone_and_turning_it_on_fills_them(
     node = _node(api, country=None, city=None)
     _address(api, node)
     state = api.client.app.state  # type: ignore[attr-defined]
-    assert api.client.portal.call(refresh_all, state.sessionmaker, state.geoip) == 0
+    assert api.client.portal.call(refresh_all, state.sessionmaker, state.ipdata) == 0
     assert _admin_node(api, node)["country"] is None
     assert (
         api.post(f"/api/v1/admin/nodes/{node}/autofill").json()["country"] == "DE"
@@ -620,7 +722,7 @@ def test_turning_auto_fill_off_leaves_nodes_alone_and_turning_it_on_fills_them(
 
 def test_fill_follows_the_data_only_for_fields_it_filled(api: Api, tmp_path: Path) -> None:
     api.become_admin()
-    geoip = _geoip(api, tmp_path / "geoip")
+    service = service_over(_geoip(api, tmp_path / "geoip"))
     state = api.client.app.state  # type: ignore[attr-defined]
 
     async def run() -> tuple[list[str], list[str]]:
@@ -630,8 +732,8 @@ def test_fill_follows_the_data_only_for_fields_it_filled(api: Api, tmp_path: Pat
             fresh = Node(
                 id="n" * 32, name="x", credential_hash="x", remote_addr=PUBLIC, auto_fields=[]
             )
-            first = fill(fresh, geoip)
-            second = fill(fresh, geoip)  # nothing new: nothing changed
+            first = fill(fresh, service)
+            second = fill(fresh, service)  # nothing new: nothing changed
             return first, second
 
     first, second = api.client.portal.call(run)

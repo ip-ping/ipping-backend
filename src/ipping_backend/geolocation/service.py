@@ -9,11 +9,12 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..ipdata.service import IpDataService, place_of
 from ..models import LocationEstimate, Measurement, MeasurementTask, utcnow
 from . import estimate as E
 from .estimate import haversine_km
 from .geofeed import Entry, Geofeeds, host_of
-from .geoip import GeoIp, GeoPlace, rule_out, valid_ip
+from .geoip import GeoPlace, rule_out, valid_ip
 from .schemas import (
     AccuracyOut,
     AddressGroupOut,
@@ -253,23 +254,23 @@ def _checked(
     )
 
 
-def with_geoip(out: LocationEstimateOut, geoip: GeoIp | None) -> LocationEstimateOut:
-    """Add what the configured databases say, checked against this result's own measurements.
+def with_geoip(out: LocationEstimateOut, ipdata: IpDataService | None) -> LocationEstimateOut:
+    """Add what the IP data sources say (their vote), checked against this result's own measurements.
 
-    Done on every request rather than stored with the estimate: the databases are replaced every
-    month and the estimate is not.
+    Done on every request rather than stored with the estimate: the databases are replaced regularly
+    and the estimate is not.
     """
     ip = valid_ip(out.target_ip)
-    if geoip is None or ip is None:
+    if ipdata is None or ip is None:
         return out
     out = out.model_copy(deep=True)
-    asn = geoip.asn(ip)
-    if asn is not None:
-        out.asn = AsnOut(number=asn.number, organization=asn.organization)
-    place = geoip.place(ip)
+    info = ipdata.lookup(ip)
+    if info.asn is not None:
+        out.asn = AsnOut(number=info.asn, organization=(info.organization or "")[:120])
+    place = place_of(info)
     if place is None:
         return out
-    out.geoip = _checked(out, place, geoip.source, attribution=geoip.attribution)
+    out.geoip = _checked(out, place, info.source or "", attribution=info.attribution)
     return out
 
 
@@ -303,12 +304,12 @@ def with_geofeed(out: LocationEstimateOut, geofeeds: Geofeeds | None) -> Locatio
 async def location_for(
     db: AsyncSession,
     measurement: Measurement,
-    geoip: GeoIp | None = None,
+    ipdata: IpDataService | None = None,
     geofeeds: Geofeeds | None = None,
     ip: str | None = None,
 ) -> LocationEstimateOut:
     """The estimate for the address most nodes measured, or for `ip` when asked (see `UnknownAddress`)."""
-    return with_geofeed(with_geoip(await _stored_or_new(db, measurement, ip), geoip), geofeeds)
+    return with_geofeed(with_geoip(await _stored_or_new(db, measurement, ip), ipdata), geofeeds)
 
 
 async def _stored_or_new(

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import json
 from collections.abc import AsyncIterator
 from typing import Annotated, Any
@@ -158,7 +157,7 @@ async def estimated_location(
         return await location_for(
             db,
             measurement,
-            request.app.state.geoip,
+            request.app.state.ipdata,
             request.app.state.geofeeds,
             valid_ip(ip),
         )
@@ -201,15 +200,15 @@ async def tested_addresses(
     service = request.app.state.ipdata
     loaded = service.available()
 
-    async def info_for(address: str) -> IpInfoOut | None:
+    def info_for(address: str) -> IpInfoOut | None:
         if not loaded:
             return None
         try:
-            return await service.lookup(address)  # type: ignore[no-any-return]
+            return service.lookup(address)  # type: ignore[no-any-return]
         except ValueError:  # not an address: a node's report is never trusted to be one
             return None
 
-    infos = await asyncio.gather(*(info_for(address) for address, _ in rows))
+    infos = [info_for(address) for address, _ in rows]
     addresses = [
         schemas.AddressInfoOut(address=address, nodes=nodes, info=info)
         for (address, nodes), info in zip(rows, infos, strict=True)
@@ -234,7 +233,7 @@ async def traced_path(
     await _authorized(db, measurement_id, session, key)
     result = await engine.load(db, measurement_id)
     assert result is not None  # noqa: S101
-    return path_for(result, request.app.state.geoip)
+    return path_for(result, request.app.state.ipdata)
 
 
 @router.post("/{measurement_id}/cancel", status_code=202)

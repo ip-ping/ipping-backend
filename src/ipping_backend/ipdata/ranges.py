@@ -19,6 +19,7 @@ import threading
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from .records import Record, asn, country, text
 
@@ -79,14 +80,25 @@ class Found:
     end: bytes
 
 
-class RangeDb:
-    """One table file, opened for reading and opened again when the file is replaced."""
+class Table[T]:
+    """One table file, opened for reading and opened again when the file is replaced.
+
+    A table of ranges that do not overlap: `find` answers with the range that holds an address. What is stored with a range, and so
+    what `find` returns, is the subclass's (`RangeDb` here, `places.PlaceDb`): it gives the SQL that picks the last range
+    starting at or before the address (its first two columns are `start` and `end`) and turns that row into an answer.
+    """
+
+    _PROBE = "SELECT 1 FROM ranges LIMIT 1"
+    _SELECT = ""
 
     def __init__(self, path: Path) -> None:
         self.path = path
         self._lock = threading.Lock()
         self._connection: sqlite3.Connection | None = None
         self._stamp: tuple[int, int] | None = None
+
+    def _found(self, row: tuple[Any, ...]) -> T:
+        raise NotImplementedError
 
     def _current(self) -> sqlite3.Connection | None:
         try:
@@ -99,7 +111,7 @@ class RangeDb:
                 connection = sqlite3.connect(
                     f"file:{self.path}?mode=ro", uri=True, check_same_thread=False
                 )
-                connection.execute("SELECT 1 FROM ranges LIMIT 1")
+                connection.execute(self._PROBE)
             except sqlite3.Error:
                 return self._connection
             old, self._connection, self._stamp = self._connection, connection, stamp
@@ -107,7 +119,7 @@ class RangeDb:
                 old.close()
         return self._connection
 
-    def find(self, address: str) -> Found | None:
+    def find(self, address: str) -> T | None:
         try:
             ip = ipaddress.ip_address(address)
         except ValueError:
@@ -118,16 +130,12 @@ class RangeDb:
             if connection is None:
                 return None
             try:
-                row = connection.execute(
-                    'SELECT start, "end", asn, country, name FROM ranges WHERE family = ? AND start <= ? '
-                    "ORDER BY start DESC LIMIT 1",
-                    (ip.version, packed),
-                ).fetchone()
+                row = connection.execute(self._SELECT, (ip.version, packed)).fetchone()
             except sqlite3.Error:
                 return None
         if row is None or packed > row[1]:
             return None
-        return Found(asn=row[2], country=row[3], name=row[4], start=row[0], end=row[1])
+        return self._found(row)
 
     def meta(self) -> dict[str, str]:
         with self._lock:
@@ -150,6 +158,18 @@ class RangeDb:
             if self._connection is not None:
                 self._connection.close()
                 self._connection = None
+
+
+class RangeDb(Table[Found]):
+    """The AS number, country and name of a range (IPtoASN, IPdeny)."""
+
+    _SELECT = (
+        'SELECT start, "end", asn, country, name FROM ranges WHERE family = ? AND start <= ? '
+        "ORDER BY start DESC LIMIT 1"
+    )
+
+    def _found(self, row: tuple[Any, ...]) -> Found:
+        return Found(asn=row[2], country=row[3], name=row[4], start=row[0], end=row[1])
 
 
 # ---- IPtoASN ---------------------------------------------------------------------------------------------------------

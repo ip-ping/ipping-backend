@@ -1,6 +1,6 @@
-"""Where the routers on a traced path are, according to the GeoIP databases (when there are any).
+"""Where the routers on a traced path are, according to the IP data sources (when there are any): the vote of every one that is on.
 
-Done on every request, not stored: the databases are replaced every month and a path is not.
+Done on every request, not stored: the databases are replaced regularly and a path is not.
 Only public addresses are looked up, and only ones the measurement itself found, so this adds no
 address to what the result already shows.
 """
@@ -9,21 +9,23 @@ from __future__ import annotations
 
 import ipaddress
 
+from ..ipdata.service import IpDataService, place_of
 from ..measurements.schemas import MeasurementOut
-from .geoip import GeoIp, valid_ip
+from .geoip import valid_ip
 from .schemas import HopPlaceOut, PathOut
 
 MAX_ADDRESSES = 1000
 
 
-def path_for(measurement: MeasurementOut, geoip: GeoIp | None) -> PathOut:
-    if geoip is None or not (geoip.has_city or geoip.has_asn):
+def path_for(measurement: MeasurementOut, ipdata: IpDataService | None) -> PathOut:
+    if ipdata is None or not (ipdata.can("position") or ipdata.can("asn")):
         return PathOut()
+    knowing = ipdata.knowing("position", "asn")
     out = PathOut(
-        source=geoip.source,
-        attribution=geoip.attribution,
-        city_database=geoip.has_city,
-        asn_database=geoip.has_asn,
+        source=", ".join(i.name for i in knowing),
+        attribution="; ".join(i.attribution for i in knowing if i.attribution) or None,
+        city_database=ipdata.can("position"),
+        asn_database=ipdata.can("asn"),
     )
     if measurement.kind != "traceroute":
         return out
@@ -36,12 +38,13 @@ def path_for(measurement: MeasurementOut, geoip: GeoIp | None) -> PathOut:
         address = valid_ip(raw)
         if address is None or not ipaddress.ip_address(address).is_global:
             continue
-        asn, place = geoip.asn(address), geoip.place(address)
-        if asn is None and place is None:
+        info = ipdata.lookup(address)
+        place = place_of(info)
+        if info.asn is None and place is None:
             continue
         out.hops[address] = HopPlaceOut(
-            asn=asn.number if asn else None,
-            as_org=(asn.organization or None) if asn else None,
+            asn=info.asn,
+            as_org=(info.organization or "")[:120] or None,
             country=(place.country or None) if place else None,
             place=place.name if place else None,
             latitude=place.latitude if place else None,

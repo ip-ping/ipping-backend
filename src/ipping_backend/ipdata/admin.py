@@ -1,8 +1,8 @@
-"""The admin endpoints for IP data: the MaxMind account, the databases, the lookup API's settings."""
+"""The admin endpoints for IP data: every source (the same for each), the lookup API's settings, node details."""
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import datetime
 from typing import Any
 
 from fastapi import APIRouter, Depends, Request
@@ -12,26 +12,15 @@ from ..errors import ApiError
 from ..models import AuditEvent
 from ..nodes.autofill import refresh_all
 from . import downloader, runtime
-from .catalog import BY_ID, CATALOG
-from .options import (
-    EDITIONS,
-    IpDataUpdate,
-    load_credentials,
-    load_keys,
-    load_options,
-    save,
-)
+from .catalog import BY_ID, CATALOG, fetchable
+from .options import IpDataUpdate, environment_account, load_keys, load_options, save
 from .schemas import (
     CredentialOut,
-    DatabaseOut,
     IpDataOut,
     LookupSettingsOut,
-    MaxMindOut,
     SourceAdminOut,
     SourceFileOut,
-    StatusErrorOut,
 )
-from .updater import MaxMindUpdater, _parse, due
 
 router = APIRouter(
     prefix="/api/v1/admin/ip-data", tags=["admin"], dependencies=[Depends(csrf_protect)]
@@ -39,90 +28,60 @@ router = APIRouter(
 
 
 def _when(value: Any) -> datetime | None:
-    return _parse(value)
+    return downloader.parse_time(value)
 
 
 async def _sources(request: Request, db: Db) -> list[SourceAdminOut]:
     state = request.app.state
     service = state.ipdata
     options = await load_options(db)
-    keys = await load_keys(db)
-    maxmind_credentials = await load_credentials(db, state.settings)
-    maxmind_status = state.maxmind.status()
-    data_status = state.dataupdater.status()["sources"]
+    keys = await load_keys(db, state.settings)
+    from_environment = environment_account(state.settings)
+    status = state.dataupdater.status()["sources"]
     out = []
     for info in CATALOG:
-        status, detail = service.state(info.id)
-        credentials = []
-        for field in info.credentials:
-            if info.id == "maxmind":
-                value = maxmind_credentials.account_id if field.name == "account_id" else ""
-                is_set = bool(
-                    value if field.name == "account_id" else maxmind_credentials.license_key
-                )
-            else:
-                value = keys.get(info.id, {}).get(field.name, "")
-                is_set = bool(value)
-            credentials.append(
-                CredentialOut(
-                    name=field.name,
-                    label=field.label,
-                    secret=field.secret,
-                    required=field.required,
-                    set=is_set,
-                    value=None if field.secret or not is_set else value,
-                )
+        status_name, detail = service.state(info.id)
+        have = keys.get(info.id, {})
+        credentials = [
+            CredentialOut(
+                name=field.name,
+                label=field.label,
+                secret=field.secret,
+                required=field.required,
+                set=bool(have.get(field.name)),
+                value=have.get(field.name) if not field.secret else None,
+                from_environment=from_environment and info.id == "maxmind",
             )
-        running = False
-        last_attempt = last_success = next_at = None
-        error: str | None = None
-        if info.id == "maxmind":
-            entry_error = maxmind_status["error"]
-            running = bool(maxmind_status["running"])
-            last_attempt, last_success = (
-                _when(maxmind_status["last_attempt"]),
-                _when(maxmind_status["last_success"]),
-            )
-            error = entry_error["message"] if entry_error else None
-        elif info.kind == "database":
-            entry = data_status.get(info.id, {})
-            running = bool(entry.get("running"))
-            last_attempt, last_success = (
-                _when(entry.get("last_attempt")),
-                _when(entry.get("last_success")),
-            )
-            error = (entry.get("error") or {}).get("message")
-            if options.enabled(info.id) and not service.offline:
-                next_at = downloader.next_check(options, entry)
-        else:
-            health = service.health[info.id]
-            if health.at:
-                last_attempt = datetime.fromtimestamp(health.at, UTC)
-                if health.status in ("error", "rate_limited"):
-                    error = health.message
-                else:
-                    last_success = last_attempt
+            for field in info.credentials
+        ]
+        entry = status.get(info.id, {})
+        enabled = options.enabled(info.id)
+        waiting_for_a_check = (
+            enabled
+            and not service.offline
+            and service.directory is not None
+            and fetchable(info.id, keys)
+        )
         out.append(
             SourceAdminOut(
                 id=info.id,
                 name=info.name,
-                kind=info.kind,
                 homepage=info.homepage,
                 summary=info.summary,
                 cost=info.cost,
                 attribution=info.attribution,
-                enabled=options.enabled(info.id),
-                state=status,
+                enabled=enabled,
+                state=status_name,
                 detail=detail,
                 credentials=credentials,
-                files=[SourceFileOut(**f) for f in service.local.files(info.id)]
-                if info.kind == "database"
-                else [],
-                running=running,
-                last_attempt=last_attempt,
-                last_success=last_success,
-                next_check=next_at,
-                error=error,
+                files=[SourceFileOut(**f) for f in service.local.files(info.id)],
+                running=bool(entry.get("running")),
+                last_attempt=_when(entry.get("last_attempt")),
+                last_success=_when(entry.get("last_success")),
+                next_check=downloader.next_check(info.id, options, entry)
+                if waiting_for_a_check
+                else None,
+                error=(entry.get("error") or {}).get("message"),
             )
         )
     return out
@@ -130,67 +89,16 @@ async def _sources(request: Request, db: Db) -> list[SourceAdminOut]:
 
 async def _build(request: Request, db: Db) -> IpDataOut:
     state = request.app.state
-    updater: MaxMindUpdater = state.maxmind
     options = await load_options(db)
-    credentials = await load_credentials(db, state.settings)
-    status = updater.status()
-    loaded = {d["file"]: d for d in state.geoip.databases()}
-    databases = []
-    for edition in EDITIONS:
-        info = loaded.get(f"{edition}.mmdb")
-        entry = status["editions"].get(edition, {})
-        built = info.get("build_epoch") if info else None
-        databases.append(
-            DatabaseOut(
-                edition=edition,
-                present=info is not None,
-                file=info["file"] if info else None,
-                type=info["type"] if info else None,
-                built=datetime.fromtimestamp(built, UTC) if built else None,
-                size=info["size"] if info else None,
-                downloaded_at=_when(entry.get("downloaded_at")),
-                checked_at=_when(entry.get("checked_at")),
-                error=entry.get("error"),
-            )
-        )
-    last_attempt = _when(status["last_attempt"])
-    next_check = None
-    if options.maxmind_auto_update and credentials.usable and updater.directory is not None:
-        next_check = datetime.now(UTC) if due(options, status) else None
-        if next_check is None and last_attempt is not None:
-            error = status["error"]
-            wait = (
-                timedelta(hours=6 if error.get("code") in ("refused", "rate_limited") else 1)
-                if error
-                else timedelta(hours=options.maxmind_update_hours)
-            )
-            next_check = last_attempt + wait
-    error = status["error"]
     return IpDataOut(
-        maxmind=MaxMindOut(
-            account_id=credentials.account_id,
-            license_key_set=bool(credentials.license_key),
-            credentials_source=credentials.source,
-            editions=options.maxmind_editions,
-            auto_update=options.maxmind_auto_update,
-            update_hours=options.maxmind_update_hours,
-            directory_configured=updater.directory is not None,
-            running=bool(status["running"]),
-            last_attempt=last_attempt,
-            last_success=_when(status["last_success"]),
-            next_check=next_check,
-            error=StatusErrorOut(code=error["code"], message=error["message"]) if error else None,
-            databases=databases,
-        ),
         lookup=LookupSettingsOut(
             enabled=options.lookup_enabled,
             access=options.lookup_access,
             per_minute=options.lookup_per_minute,
         ),
         node_autofill=options.node_autofill,
+        directory_configured=state.ipdata.directory is not None,
         databases_loaded=state.ipdata.available(),
-        source=state.geoip.source if loaded else None,
-        attribution=state.geoip.attribution,
         sources=await _sources(request, db),
         offline=state.ipdata.offline,
         data_update_hours=options.data_update_hours,
@@ -199,74 +107,71 @@ async def _build(request: Request, db: Db) -> IpDataOut:
 
 @router.get("", response_model=IpDataOut)
 async def get_ip_data(request: Request, admin: AdminUser, db: Db) -> IpDataOut:
-    """The MaxMind account (never the key), the databases in use, and the settings of the lookup API."""
+    """Every IP data source with its switch, what it needs and how it is doing, and the settings of the lookup API. Keys are never sent."""
     return await _build(request, db)
 
 
 @router.put("", response_model=IpDataOut)
 async def put_ip_data(body: IpDataUpdate, request: Request, admin: AdminUser, db: Db) -> IpDataOut:
-    """Change any of the settings. Only what is sent changes. A license key that is sent replaces the saved one."""
+    """Change any of the settings. Only what is sent changes. A key or token that is sent replaces the saved one."""
+    state = request.app.state
     before = await load_options(db)
-    credentials_changed = bool(
-        body.license_key or body.account_id is not None or body.clear_credentials
-    )
+    keys_before = await load_keys(db, state.settings)
     await save(db, body)
-    sent = sorted(k for k in body.model_fields_set if k not in ("license_key", "account_id"))
+    credentials_changed = any(change.credentials for change in (body.sources or {}).values())
     db.add(
         AuditEvent(
             actor=admin.username,
             action="ip_data.updated",
             subject=None,
-            data={"fields": sent, "credentials": "changed" if credentials_changed else "unchanged"},
+            data={
+                "fields": sorted(body.model_fields_set),
+                "credentials": "changed" if credentials_changed else "unchanged",
+            },
             source_ip=client_ip(request),
         )
     )
     await db.commit()
-    state = request.app.state
     after = await load_options(db)
+    keys_after = await load_keys(db, state.settings)
     await runtime.reload(state)  # the sources use the new switches and keys at once
     turned_on = [s for s in BY_ID if after.enabled(s) and not before.enabled(s)]
-    if turned_on:
-        state.dataupdater.start(force=False)  # a database that was just turned on is not waited for
+    given = [s for s in BY_ID if keys_after.get(s) != keys_before.get(s)]
+    if turned_on or given:
+        state.dataupdater.start()  # a source that was just turned on, or given its key, is not waited for
     if after.node_autofill and not before.node_autofill:
         await refresh_all(
-            state.sessionmaker, state.geoip
+            state.sessionmaker, state.ipdata
         )  # it has just been turned on: fill what is empty now
-    credentials = await load_credentials(db, state.settings)
-    if credentials_changed and credentials.usable and after.maxmind_auto_update:
-        state.maxmind.start(force=False)  # a key was just given: do not wait for the next check
     return await _build(request, db)
 
 
 @router.post("/update", response_model=IpDataOut, status_code=202)
 async def update_now(request: Request, admin: AdminUser, db: Db) -> IpDataOut:
-    """Download the databases now (it runs in the background: ask again to see how it went)."""
+    """Check every source that is on for a newer file now, and download what is newer (it runs in the background: ask again to see how it went)."""
     state = request.app.state
-    if state.maxmind.directory is None:
+    updater = state.dataupdater
+    if updater.directory is None:
         raise ApiError(
             409,
             "no_directory",
             "The backend has no directory to keep the databases in (IPPING_GEOIP_DIR).",
         )
-    options = await load_options(db)
-    credentials = await load_credentials(db, state.settings)
-    started = False
-    if credentials.usable and options.enabled("maxmind"):
-        state.maxmind.start(force=True)
-        started = True
-    if not state.dataupdater.offline:
-        state.dataupdater.start(force=True)
-        started = True
-    if not started:
-        if options.enabled("maxmind") and not credentials.usable:
-            raise ApiError(
-                409, "no_credentials", "Enter the MaxMind account ID and license key first."
-            )
+    if updater.offline:
         raise ApiError(
             409,
             "offline",
             "This server may not call out (IPPING_IPDATA_OFFLINE), so nothing is downloaded.",
         )
+    options = await load_options(db)
+    keys = await load_keys(db, state.settings)
+    if not updater.wanted(options, keys):
+        raise ApiError(
+            409,
+            "nothing_to_update",
+            "No source that is on can be downloaded yet: turn one on, and give each source that needs a key its key.",
+        )
+    updater.start()
     db.add(
         AuditEvent(
             actor=admin.username,

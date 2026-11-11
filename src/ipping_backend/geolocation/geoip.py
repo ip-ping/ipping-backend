@@ -1,13 +1,13 @@
-"""An optional cross-check of a measured location against a GeoIP / ASN database.
+"""MaxMind-format IP databases (`.mmdb`) on disk, and the check of a claimed place against measurements.
 
-The estimate itself is built from round-trip times only and is calibrated on real data; a GeoIP database
-does not change it. What a database adds is a second opinion that can be *checked*: if it says the
-address is in Tokyo and a node in Frankfurt heard from it in 4 ms, light cannot have made that trip, and
-the result says so. It also names the network (AS number and organisation).
+The estimate itself is built from round-trip times only and is calibrated on real data; IP data does not
+change it. What the IP data adds is a second opinion that can be *checked*: if it says the address is in
+Tokyo and a node in Frankfurt heard from it in 4 ms, light cannot have made that trip, and the result says so
+(`rule_out`).
 
-Databases are MaxMind-format files (`.mmdb`): MaxMind GeoLite2 or DB-IP Lite (CC BY 4.0, which asks for
-attribution, shown with the result). They are read from disk when configured and picked up again when
-the file changes, so a monthly update needs no restart. Nothing is fetched on a request.
+MaxMind GeoLite2 and DB-IP Lite are `.mmdb` files in one layout, which `GeoIp` finds in a directory by their
+names and opens again when the file changes, so an update needs no restart. They are two sources among
+nine (see `ipdata/`): what they say is voted on with the rest, never preferred. Nothing is fetched on a request.
 """
 
 from __future__ import annotations
@@ -16,7 +16,6 @@ import ipaddress
 import logging
 import threading
 import time
-from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -30,11 +29,6 @@ log = logging.getLogger(__name__)
 # How often a directory is looked at again for new or newer database files.
 SCAN_EVERY_S = 10.0
 
-ATTRIBUTIONS = {
-    "dbip": "IP geolocation by DB-IP (db-ip.com), licensed CC BY 4.0",
-    "maxmind": "This product includes GeoLite2 data created by MaxMind (maxmind.com)",
-}
-
 
 @dataclass(frozen=True)
 class GeoPlace:
@@ -42,12 +36,6 @@ class GeoPlace:
     country: str
     latitude: float
     longitude: float
-
-
-@dataclass(frozen=True)
-class AsnInfo:
-    number: int
-    organization: str
 
 
 @dataclass(frozen=True)
@@ -61,15 +49,15 @@ class RuledOut:
     max_distance_km: float
 
 
-def _first(*values: Any) -> Any:
-    return next((v for v in values if v), None)
-
-
 def flavour_of(name: str) -> str:
-    """Whose database a file is, by its name: `maxmind` (GeoLite2 and GeoIP2, and anything else MaxMind-format) or `dbip`."""
+    """Whose database a file is, by its name: `maxmind` (GeoLite2 and GeoIP2, and anything else MaxMind-format), `dbip`, or
+    `iplocate` or `ipinfo`, whose files have a layout of their own and are read by those sources only."""
     lowered = name.lower()
     if lowered.startswith(("geolite2", "geoip2")):
         return "maxmind"
+    for own in ("iplocate", "ipinfo"):
+        if lowered.startswith(own):
+            return own
     return "dbip" if "dbip" in lowered or "db-ip" in lowered else "maxmind"
 
 
@@ -81,9 +69,6 @@ class _Database:
         self._lock = threading.Lock()
         self._reader: maxminddb.Reader | None = None
         self._stamp: tuple[int, int] | None = None
-
-    def get(self, ip: str) -> dict[str, Any] | None:
-        return self.get_with_prefix(ip)[0]
 
     def get_with_prefix(self, ip: str) -> tuple[dict[str, Any] | None, int | None]:
         """The record for the address, and the length of the network it covers (in the address's own family)."""
@@ -136,19 +121,13 @@ class _Database:
                     old.close()
             return self._reader
 
-    @property
-    def description(self) -> str:
-        reader = self._current()
-        return reader.metadata().database_type if reader else ""
-
 
 class GeoIp:
-    """The configured databases (either, both or neither).
+    """The MaxMind-format databases of a directory (and any given by path), one of each kind per flavour.
 
-    With a directory, the files in it whose name has `city`, `asn` or `country` in it (any case) are used, MaxMind's own
-    (GeoLite2-City.mmdb) before others and then the newest, and the directory is looked at again from time to time: a
-    first download after the server started is found without a restart, and so is a newer file. An explicit path is
-    fixed.
+    With a directory, the files in it whose name has `city`, `asn` or `country` in it (any case) are used, the newest of each
+    flavour (`maxmind`, `dbip`), and the directory is looked at again from time to time: a first download after the server started
+    is found without a restart, and so is a newer file. An explicit path is fixed.
     """
 
     def __init__(
@@ -164,16 +143,11 @@ class GeoIp:
         self._fixed: dict[str, _Database | None] = {
             "city": _Database(city) if city else None,
             "asn": _Database(asn) if asn else None,
-            "country": None,
         }
-        self._found: dict[str, _Database | None] = {"city": None, "asn": None, "country": None}
-        self._next_scan = {"city": 0.0, "asn": 0.0, "country": 0.0}
-        # one file per (flavour, kind) for the sources that are read apart (MaxMind's, DB-IP's)
-        self._found_flavoured: dict[tuple[str, str], _Database | None] = {}
-        self._next_scan_flavoured: dict[tuple[str, str], float] = {}
+        # one file per (flavour, kind): the sources that are read apart (MaxMind's, DB-IP's)
+        self._found: dict[tuple[str, str], _Database | None] = {}
+        self._next_scan: dict[tuple[str, str], float] = {}
         self._lock = threading.Lock()
-        # Whether a flavour (`maxmind`, `dbip`) may be used: the administrator can turn a source off
-        self.enabled: Callable[[str], bool] = lambda flavour: True
 
     @classmethod
     def from_settings(cls, directory: str | None, city: str | None, asn: str | None) -> GeoIp:
@@ -184,33 +158,14 @@ class GeoIp:
             directory=Path(directory) if directory else None,
         )
 
-    def _best(self, kind: str) -> Path | None:
-        """The file to use for this kind: MaxMind's own (GeoLite2, GeoIP2) before any other, then the newest."""
-        assert self._dir is not None  # noqa: S101
-        best: tuple[bool, float] | None = None
-        chosen: Path | None = None
-        for path in self._dir.iterdir():
-            name = path.name.lower()
-            if not name.endswith(".mmdb") or kind not in name or not self.enabled(flavour_of(name)):
-                continue
-            try:
-                rank = (name.startswith(("geolite2", "geoip2")), path.stat().st_mtime)
-            except OSError:
-                continue
-            if best is None or rank > best:
-                best, chosen = rank, path
-        return chosen
-
     def rescan(self) -> None:
         """Look at the directory again at the next lookup (a download has just replaced a file)."""
         with self._lock:
-            for kind in self._next_scan:
-                self._next_scan[kind] = 0.0
-            for key in self._next_scan_flavoured:
-                self._next_scan_flavoured[key] = 0.0
+            for key in self._next_scan:
+                self._next_scan[key] = 0.0
 
     def flavoured(self, flavour: str, kind: str) -> _Database | None:
-        """The database of this kind that belongs to one source (`maxmind` or `dbip`), whether or not it is the one in use.
+        """The database of this kind that belongs to one source (`maxmind` or `dbip`).
 
         An explicit path counts for the flavour its name says; in a directory it is the newest file of that flavour.
         """
@@ -222,8 +177,8 @@ class GeoIp:
         key = (flavour, kind)
         now = time.monotonic()
         with self._lock:
-            if now >= self._next_scan_flavoured.get(key, 0.0):
-                self._next_scan_flavoured[key] = now + self._scan_every_s
+            if now >= self._next_scan.get(key, 0.0):
+                self._next_scan[key] = now + self._scan_every_s
                 newest: Path | None = None
                 newest_at = -1.0
                 try:
@@ -238,110 +193,12 @@ class GeoIp:
                                 newest, newest_at = path, modified
                 except OSError:
                     newest = None
-                current = self._found_flavoured.get(key)
+                current = self._found.get(key)
                 if newest is None:
-                    self._found_flavoured[key] = None
+                    self._found[key] = None
                 elif current is None or current.path != newest:
-                    self._found_flavoured[key] = _Database(newest)
-            return self._found_flavoured.get(key)
-
-    def _database(self, kind: str) -> _Database | None:
-        fixed = self._fixed[kind]
-        if fixed is not None or self._dir is None:
-            return fixed if fixed is None or self.enabled(flavour_of(fixed.path.name)) else None
-        now = time.monotonic()
-        with self._lock:
-            if now >= self._next_scan[kind]:
-                self._next_scan[kind] = now + self._scan_every_s
-                try:
-                    newest = self._best(kind)
-                except OSError:
-                    newest = None
-                current = self._found[kind]
-                if newest is None:
-                    self._found[kind] = None
-                elif current is None or current.path != newest:
-                    self._found[kind] = _Database(newest)
-            return self._found[kind]
-
-    @property
-    def _country(self) -> _Database | None:
-        return self._database("country")
-
-    def databases(self) -> list[dict[str, Any]]:
-        """The databases in use: which file, what it is, when it was built."""
-        found = []
-        for kind in ("city", "country", "asn"):
-            database = self._database(kind)
-            info = database.info() if database is not None else None
-            if info is not None:
-                found.append({"kind": kind, **info})
-        return found
-
-    def record(self, kind: str, ip: str) -> tuple[dict[str, Any] | None, int | None]:
-        """The raw record of the `city`, `country` or `asn` database for an address, with its network's prefix length."""
-        database = self._database(kind)
-        return database.get_with_prefix(ip) if database is not None else (None, None)
-
-    @property
-    def _city(self) -> _Database | None:
-        return self._database("city")
-
-    @property
-    def _asn(self) -> _Database | None:
-        return self._database("asn")
-
-    @property
-    def has_city(self) -> bool:
-        db = self._city
-        return db is not None and db.path.exists()
-
-    @property
-    def has_asn(self) -> bool:
-        db = self._asn
-        return db is not None and db.path.exists()
-
-    @property
-    def _flavour(self) -> str:
-        names = [str(db.path).lower() for db in (self._city, self._asn) if db is not None]
-        return "dbip" if any("dbip" in n for n in names) else "maxmind"
-
-    @property
-    def attribution(self) -> str | None:
-        return ATTRIBUTIONS[self._flavour] if self.has_city or self.has_asn else None
-
-    @property
-    def source(self) -> str:
-        return "DB-IP Lite" if self._flavour == "dbip" else "MaxMind GeoLite2"
-
-    def place(self, ip: str) -> GeoPlace | None:
-        database = self._city
-        record = database.get(ip) if database else None
-        if not record:
-            return None
-        location = record.get("location") or {}
-        lat, lon = location.get("latitude"), location.get("longitude")
-        if lat is None or lon is None:
-            return None
-        names = (record.get("city") or {}).get("names") or {}
-        country = record.get("country") or {}
-        name = _first(names.get("en"), (country.get("names") or {}).get("en"), "Unknown")
-        return GeoPlace(
-            name=str(name)[:80],
-            country=str(country.get("iso_code") or "")[:2],
-            latitude=float(lat),
-            longitude=float(lon),
-        )
-
-    def asn(self, ip: str) -> AsnInfo | None:
-        database = self._asn
-        record = database.get(ip) if database else None
-        if not record or not record.get("autonomous_system_number"):
-            return None
-        return AsnInfo(
-            number=int(record["autonomous_system_number"]),
-            organization=str(record.get("autonomous_system_organization") or "")[:120],
-        )
+                    self._found[key] = _Database(newest)
+            return self._found.get(key)
 
 
 def valid_ip(text: str | None) -> str | None:

@@ -948,6 +948,12 @@
       },
       "CredentialOut": {
         "properties": {
+          "from_environment": {
+            "default": false,
+            "description": "Whether it is set in the server's environment, which wins over the admin page and cannot be changed there",
+            "title": "From Environment",
+            "type": "boolean"
+          },
           "label": {
             "title": "Label",
             "type": "string"
@@ -990,110 +996,6 @@
           "set"
         ],
         "title": "CredentialOut",
-        "type": "object"
-      },
-      "DatabaseOut": {
-        "properties": {
-          "built": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "When MaxMind built the database",
-            "title": "Built"
-          },
-          "checked_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Checked At"
-          },
-          "downloaded_at": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Downloaded At"
-          },
-          "edition": {
-            "enum": [
-              "GeoLite2-City",
-              "GeoLite2-Country",
-              "GeoLite2-ASN"
-            ],
-            "title": "Edition",
-            "type": "string"
-          },
-          "error": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Error"
-          },
-          "file": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "File"
-          },
-          "present": {
-            "title": "Present",
-            "type": "boolean"
-          },
-          "size": {
-            "anyOf": [
-              {
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Size"
-          },
-          "type": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Type"
-          }
-        },
-        "required": [
-          "edition",
-          "present"
-        ],
-        "title": "DatabaseOut",
         "type": "object"
       },
       "DnsAnswerRecord": {
@@ -1851,52 +1753,32 @@
       },
       "IpDataOut": {
         "properties": {
-          "attribution": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Attribution"
-          },
           "data_update_hours": {
-            "description": "How often the databases that need no account are asked for a newer file",
+            "description": "How often the sources are asked for a newer file",
             "title": "Data Update Hours",
             "type": "integer"
           },
           "databases_loaded": {
-            "description": "Whether any IP data source can answer now (a database with data, or an online source)",
+            "description": "Whether any IP data source can answer now",
             "title": "Databases Loaded",
+            "type": "boolean"
+          },
+          "directory_configured": {
+            "description": "Whether the backend has a directory to keep the databases in",
+            "title": "Directory Configured",
             "type": "boolean"
           },
           "lookup": {
             "$ref": "#/components/schemas/LookupSettingsOut"
-          },
-          "maxmind": {
-            "$ref": "#/components/schemas/MaxMindOut"
           },
           "node_autofill": {
             "title": "Node Autofill",
             "type": "boolean"
           },
           "offline": {
-            "description": "True when the server may not call out (IPPING_IPDATA_OFFLINE): no online lookups, no downloads",
+            "description": "True when the server may not call out (IPPING_IPDATA_OFFLINE): nothing is downloaded",
             "title": "Offline",
             "type": "boolean"
-          },
-          "source": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Source"
           },
           "sources": {
             "description": "Every source, with its switch, what it needs and how it is doing",
@@ -1908,9 +1790,9 @@
           }
         },
         "required": [
-          "maxmind",
           "lookup",
           "node_autofill",
+          "directory_configured",
           "databases_loaded",
           "sources",
           "offline",
@@ -1922,23 +1804,6 @@
       "IpDataUpdate": {
         "description": "Every field optional: only the ones that are sent change.",
         "properties": {
-          "account_id": {
-            "anyOf": [
-              {
-                "maxLength": 32,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Account Id"
-          },
-          "clear_credentials": {
-            "default": false,
-            "title": "Clear Credentials",
-            "type": "boolean"
-          },
           "data_update_hours": {
             "anyOf": [
               {
@@ -1951,18 +1816,6 @@
               }
             ],
             "title": "Data Update Hours"
-          },
-          "license_key": {
-            "anyOf": [
-              {
-                "maxLength": 128,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "License Key"
           },
           "lookup_access": {
             "anyOf": [
@@ -2003,51 +1856,6 @@
               }
             ],
             "title": "Lookup Per Minute"
-          },
-          "maxmind_auto_update": {
-            "anyOf": [
-              {
-                "type": "boolean"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Maxmind Auto Update"
-          },
-          "maxmind_editions": {
-            "anyOf": [
-              {
-                "items": {
-                  "enum": [
-                    "GeoLite2-City",
-                    "GeoLite2-Country",
-                    "GeoLite2-ASN"
-                  ],
-                  "type": "string"
-                },
-                "maxItems": 3,
-                "minItems": 1,
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Maxmind Editions"
-          },
-          "maxmind_update_hours": {
-            "anyOf": [
-              {
-                "maximum": 168.0,
-                "minimum": 6.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Maxmind Update Hours"
           },
           "node_autofill": {
             "anyOf": [
@@ -2574,127 +2382,6 @@
           "per_minute"
         ],
         "title": "LookupSettingsOut",
-        "type": "object"
-      },
-      "MaxMindOut": {
-        "properties": {
-          "account_id": {
-            "title": "Account Id",
-            "type": "string"
-          },
-          "auto_update": {
-            "title": "Auto Update",
-            "type": "boolean"
-          },
-          "credentials_source": {
-            "enum": [
-              "admin",
-              "environment",
-              "none"
-            ],
-            "title": "Credentials Source",
-            "type": "string"
-          },
-          "databases": {
-            "items": {
-              "$ref": "#/components/schemas/DatabaseOut"
-            },
-            "title": "Databases",
-            "type": "array"
-          },
-          "directory_configured": {
-            "description": "Whether the backend has a directory to keep the databases in",
-            "title": "Directory Configured",
-            "type": "boolean"
-          },
-          "editions": {
-            "items": {
-              "enum": [
-                "GeoLite2-City",
-                "GeoLite2-Country",
-                "GeoLite2-ASN"
-              ],
-              "type": "string"
-            },
-            "title": "Editions",
-            "type": "array"
-          },
-          "error": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/StatusErrorOut"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "last_attempt": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Attempt"
-          },
-          "last_success": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Last Success"
-          },
-          "license_key_set": {
-            "description": "Whether a license key is saved. The key itself is never sent back.",
-            "title": "License Key Set",
-            "type": "boolean"
-          },
-          "next_check": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Next Check"
-          },
-          "running": {
-            "title": "Running",
-            "type": "boolean"
-          },
-          "update_hours": {
-            "title": "Update Hours",
-            "type": "integer"
-          }
-        },
-        "required": [
-          "account_id",
-          "license_key_set",
-          "credentials_source",
-          "editions",
-          "auto_update",
-          "update_hours",
-          "directory_configured",
-          "running",
-          "last_attempt",
-          "last_success",
-          "next_check",
-          "error",
-          "databases"
-        ],
-        "title": "MaxMindOut",
         "type": "object"
       },
       "MeasurementAddressesOut": {
@@ -4270,11 +3957,11 @@
                 "type": "null"
               }
             ],
-            "description": "How the last download or lookup failed",
+            "description": "How the last download failed",
             "title": "Error"
           },
           "files": {
-            "description": "The files of a database that are in use",
+            "description": "The files of the source that are in use",
             "items": {
               "$ref": "#/components/schemas/SourceFileOut"
             },
@@ -4289,14 +3976,6 @@
             "title": "Id",
             "type": "string"
           },
-          "kind": {
-            "enum": [
-              "database",
-              "online"
-            ],
-            "title": "Kind",
-            "type": "string"
-          },
           "last_attempt": {
             "anyOf": [
               {
@@ -4307,7 +3986,7 @@
                 "type": "null"
               }
             ],
-            "description": "When it was last downloaded, or asked",
+            "description": "When it was last checked for a newer file",
             "title": "Last Attempt"
           },
           "last_success": {
@@ -4351,8 +4030,7 @@
               "needs_setup",
               "waiting",
               "offline",
-              "no_directory",
-              "paused"
+              "no_directory"
             ],
             "title": "State",
             "type": "string"
@@ -4366,7 +4044,6 @@
         "required": [
           "id",
           "name",
-          "kind",
           "homepage",
           "summary",
           "cost",
@@ -4402,14 +4079,6 @@
             "title": "Id",
             "type": "string"
           },
-          "kind": {
-            "enum": [
-              "database",
-              "online"
-            ],
-            "title": "Kind",
-            "type": "string"
-          },
           "message": {
             "anyOf": [
               {
@@ -4439,7 +4108,6 @@
               "disabled",
               "needs_setup",
               "waiting",
-              "rate_limited",
               "offline"
             ],
             "title": "Status",
@@ -4449,7 +4117,6 @@
         "required": [
           "id",
           "name",
-          "kind",
           "status",
           "said",
           "agrees",
@@ -4653,24 +4320,6 @@
           }
         },
         "title": "SourceUpdate",
-        "type": "object"
-      },
-      "StatusErrorOut": {
-        "properties": {
-          "code": {
-            "title": "Code",
-            "type": "string"
-          },
-          "message": {
-            "title": "Message",
-            "type": "string"
-          }
-        },
-        "required": [
-          "code",
-          "message"
-        ],
-        "title": "StatusErrorOut",
         "type": "object"
       },
       "Summary": {
@@ -6147,7 +5796,7 @@
   },
   "info": {
     "title": "ipping backend",
-    "version": "0.12.0"
+    "version": "0.13.0"
   },
   "openapi": "3.1.0",
   "paths": {
@@ -6450,7 +6099,7 @@
     },
     "/api/v1/admin/ip-data": {
       "get": {
-        "description": "The MaxMind account (never the key), the databases in use, and the settings of the lookup API.",
+        "description": "Every IP data source with its switch, what it needs and how it is doing, and the settings of the lookup API. Keys are never sent.",
         "operationId": "get_ip_data_api_v1_admin_ip_data_get",
         "responses": {
           "200": {
@@ -6470,7 +6119,7 @@
         ]
       },
       "put": {
-        "description": "Change any of the settings. Only what is sent changes. A license key that is sent replaces the saved one.",
+        "description": "Change any of the settings. Only what is sent changes. A key or token that is sent replaces the saved one.",
         "operationId": "put_ip_data_api_v1_admin_ip_data_put",
         "requestBody": {
           "content": {
@@ -6512,7 +6161,7 @@
     },
     "/api/v1/admin/ip-data/update": {
       "post": {
-        "description": "Download the databases now (it runs in the background: ask again to see how it went).",
+        "description": "Check every source that is on for a newer file now, and download what is newer (it runs in the background: ask again to see how it went).",
         "operationId": "update_now_api_v1_admin_ip_data_update_post",
         "responses": {
           "202": {

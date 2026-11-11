@@ -5,12 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from .options import Edition
-
-SourceKind = Literal["database", "online"]
-AnswerStatus = Literal[
-    "ok", "empty", "error", "disabled", "needs_setup", "waiting", "rate_limited", "offline"
-]
+AnswerStatus = Literal["ok", "empty", "error", "disabled", "needs_setup", "waiting", "offline"]
 
 
 class SourceSaid(BaseModel):
@@ -33,7 +28,6 @@ class SourceAnswerOut(BaseModel):
 
     id: str
     name: str
-    kind: SourceKind
     status: AnswerStatus = Field(
         description="ok: it said something; empty: it knows nothing about this address; the others say why it did not answer"
     )
@@ -89,43 +83,6 @@ class IpInfoOut(BaseModel):
     )
 
 
-class DatabaseOut(BaseModel):
-    edition: Edition
-    present: bool
-    file: str | None = None
-    type: str | None = None
-    built: datetime | None = Field(default=None, description="When MaxMind built the database")
-    size: int | None = None
-    downloaded_at: datetime | None = None
-    checked_at: datetime | None = None
-    error: str | None = None
-
-
-class StatusErrorOut(BaseModel):
-    code: str
-    message: str
-
-
-class MaxMindOut(BaseModel):
-    account_id: str
-    license_key_set: bool = Field(
-        description="Whether a license key is saved. The key itself is never sent back."
-    )
-    credentials_source: Literal["admin", "environment", "none"]
-    editions: list[Edition]
-    auto_update: bool
-    update_hours: int
-    directory_configured: bool = Field(
-        description="Whether the backend has a directory to keep the databases in"
-    )
-    running: bool
-    last_attempt: datetime | None
-    last_success: datetime | None
-    next_check: datetime | None
-    error: StatusErrorOut | None
-    databases: list[DatabaseOut]
-
-
 class LookupSettingsOut(BaseModel):
     enabled: bool
     access: Literal["public", "api_key", "admin"]
@@ -141,6 +98,10 @@ class CredentialOut(BaseModel):
     required: bool
     set: bool
     value: str | None = Field(default=None, description="The value, for what is not a secret")
+    from_environment: bool = Field(
+        default=False,
+        description="Whether it is set in the server's environment, which wins over the admin page and cannot be changed there",
+    )
 
 
 class SourceFileOut(BaseModel):
@@ -152,9 +113,7 @@ class SourceFileOut(BaseModel):
     rows: int | None = None
 
 
-SourceState = Literal[
-    "ready", "disabled", "needs_setup", "waiting", "offline", "no_directory", "paused"
-]
+SourceState = Literal["ready", "disabled", "needs_setup", "waiting", "offline", "no_directory"]
 
 
 class SourceAdminOut(BaseModel):
@@ -162,7 +121,6 @@ class SourceAdminOut(BaseModel):
 
     id: str
     name: str
-    kind: SourceKind
     homepage: str
     summary: str = Field(description="What it knows")
     cost: str = Field(description="What it needs from the administrator")
@@ -171,31 +129,27 @@ class SourceAdminOut(BaseModel):
     state: SourceState = Field(description="ready, or why the source does not answer now")
     detail: str | None = None
     credentials: list[CredentialOut]
-    files: list[SourceFileOut] = Field(description="The files of a database that are in use")
+    files: list[SourceFileOut] = Field(description="The files of the source that are in use")
     running: bool = Field(description="Whether a download is going on")
     last_attempt: datetime | None = Field(
-        default=None, description="When it was last downloaded, or asked"
+        default=None, description="When it was last checked for a newer file"
     )
     last_success: datetime | None = None
     next_check: datetime | None = None
-    error: str | None = Field(default=None, description="How the last download or lookup failed")
+    error: str | None = Field(default=None, description="How the last download failed")
 
 
 class IpDataOut(BaseModel):
-    maxmind: MaxMindOut
     lookup: LookupSettingsOut
     node_autofill: bool
-    databases_loaded: bool = Field(
-        description="Whether any IP data source can answer now (a database with data, or an online source)"
+    directory_configured: bool = Field(
+        description="Whether the backend has a directory to keep the databases in"
     )
-    source: str | None = None
-    attribution: str | None = None
+    databases_loaded: bool = Field(description="Whether any IP data source can answer now")
     sources: list[SourceAdminOut] = Field(
         description="Every source, with its switch, what it needs and how it is doing"
     )
     offline: bool = Field(
-        description="True when the server may not call out (IPPING_IPDATA_OFFLINE): no online lookups, no downloads"
+        description="True when the server may not call out (IPPING_IPDATA_OFFLINE): nothing is downloaded"
     )
-    data_update_hours: int = Field(
-        description="How often the databases that need no account are asked for a newer file"
-    )
+    data_update_hours: int = Field(description="How often the sources are asked for a newer file")

@@ -34,3 +34,6 @@ def configure_logging(level: str = "INFO", as_json: bool = True) -> None:
     root.handlers[:] = [handler]
     root.setLevel(level.upper())
     logging.getLogger("alembic").setLevel(logging.WARNING)  # plugin chatter on every startup
+    # httpx logs the whole URL of every request at INFO, and a download that is paid for with an account's token carries it in the URL
+    for noisy in ("httpx", "httpcore"):
+        logging.getLogger(noisy).setLevel(logging.WARNING)

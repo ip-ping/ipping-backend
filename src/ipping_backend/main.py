@@ -29,7 +29,6 @@ from .ipdata import router as ipdata_router
 from .ipdata import runtime as ipdata_runtime
 from .ipdata.downloader import DataUpdater
 from .ipdata.service import IpDataService
-from .ipdata.updater import MaxMindUpdater
 from .logging_config import configure_logging
 from .measurements import router as measurements_router
 from .measurements import text as text_router
@@ -130,24 +129,21 @@ def create_app(
             Path(settings.geoip_dir) / GEOFEED_FILE if settings.geoip_dir else None
         )
 
-        async def refresh_nodes() -> None:
-            await refresh_all(sessionmaker, app.state.geoip)
-
-        # The MaxMind databases an administrator turned on, kept up to date (see ipdata/)
-        app.state.maxmind = MaxMindUpdater(
-            sessionmaker, settings, app.state.geoip, on_updated=refresh_nodes
-        )
-        # Every IP data source, asked and voted on (see ipdata/service.py), and the databases that need no account kept up to date
+        # Every IP data source, kept up to date on disk and asked and voted on (see ipdata/)
         data_dir = Path(settings.geoip_dir) if settings.geoip_dir else None
         app.state.ipdata = IpDataService(
             lambda: app.state.geoip, data_dir, offline=settings.ipdata_offline
         )
+
+        async def refresh_nodes() -> None:
+            await refresh_all(sessionmaker, app.state.ipdata)
+
         app.state.dataupdater = DataUpdater(
             sessionmaker,
+            settings,
             data_dir,
             lambda: app.state.geoip,
             offline=settings.ipdata_offline,
-            enabled=app.state.ipdata.enabled,
             on_updated=refresh_nodes,
         )
 
@@ -170,7 +166,6 @@ def create_app(
         ]
         loops.append(asyncio.create_task(maintenance.loop(sessionmaker), name="maintenance"))
         loops.append(asyncio.create_task(scheduler.run(), name="watches"))
-        loops.append(asyncio.create_task(app.state.maxmind.run(), name="maxmind"))
         loops.append(asyncio.create_task(app.state.dataupdater.run(), name="ipdata-update"))
         loops.append(
             asyncio.create_task(ipdata_runtime.settings_loop(app.state), name="ipdata-settings")
@@ -184,7 +179,6 @@ def create_app(
             await asyncio.gather(*loops, return_exceptions=True)
             await engine.shutdown()
             await cluster.stop()
-            await app.state.ipdata.close()
             await db_engine.dispose()
 
     app = FastAPI(

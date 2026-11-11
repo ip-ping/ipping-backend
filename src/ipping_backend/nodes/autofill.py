@@ -1,6 +1,6 @@
 """Filling in a node's details from the address it connects from.
 
-A node's country, region, city, position, provider and AS number can come from the IP data (MaxMind) instead of being typed.
+A node's country, region, city, position, provider and AS number can come from the IP data (the vote of every source that is on) instead of being typed.
 The rule is simple and never surprising:
 
 * a field that is empty gets the data's value, and is recorded in `node.auto_fields`;
@@ -32,10 +32,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from ..geolocation.estimate import haversine_km
 from ..geolocation.gazetteer import cities
-from ..geolocation.geoip import GeoIp
-from ..ipdata.lookup import lookup
 from ..ipdata.options import load_options
 from ..ipdata.schemas import IpInfoOut
+from ..ipdata.service import IpDataService
 from ..models import Node
 
 AUTO_FIELDS = ("country", "region", "city", "latitude", "longitude", "provider", "asn")
@@ -104,12 +103,12 @@ def _conflicts(node: Node, auto: list[str], values: dict[str, Any]) -> bool:
     return False
 
 
-def fill(node: Node, geoip: GeoIp) -> list[str]:
+def fill(node: Node, ipdata: IpDataService) -> list[str]:
     """Apply the data for `node.remote_addr` to the node. Returns the fields that changed."""
     if not node.remote_addr:
         return []
     try:
-        info = lookup(geoip, node.remote_addr)
+        info = ipdata.lookup(node.remote_addr)
     except ValueError:
         return []
     if not info.found:
@@ -176,19 +175,19 @@ def apply_edit(node: Node, edits: dict[str, Any]) -> list[str]:
     return handed_back
 
 
-async def fill_if_enabled(db: AsyncSession, node: Node, geoip: GeoIp) -> list[str]:
+async def fill_if_enabled(db: AsyncSession, node: Node, ipdata: IpDataService) -> list[str]:
     """`fill`, unless the administrator turned auto-fill off."""
-    return fill(node, geoip) if (await load_options(db)).node_autofill else []
+    return fill(node, ipdata) if (await load_options(db)).node_autofill else []
 
 
-async def refresh_all(sessionmaker: async_sessionmaker[AsyncSession], geoip: GeoIp) -> int:
+async def refresh_all(sessionmaker: async_sessionmaker[AsyncSession], ipdata: IpDataService) -> int:
     """Fill every node that has an address (the data changed, or auto-fill was just turned on). Returns how many changed."""
     changed = 0
     async with sessionmaker() as db:
         if not (await load_options(db)).node_autofill:
             return 0
         for node in (await db.execute(select(Node).where(Node.remote_addr.is_not(None)))).scalars():
-            if fill(node, geoip):
+            if fill(node, ipdata):
                 changed += 1
         await db.commit()
     return changed

@@ -1,4 +1,4 @@
-"""Downloading and keeping up the MaxMind databases, against a pretend MaxMind (no network)."""
+"""Downloading and keeping up the MaxMind databases (a source like the others), against a pretend MaxMind (no network)."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import asyncio
 import fcntl
 import hashlib
 import io
+import json
 import os
 import tarfile
 import time
@@ -19,11 +20,11 @@ import pytest
 
 from ipping_backend.config import Settings
 from ipping_backend.geolocation.geoip import GeoIp
-from ipping_backend.ipdata import updater
+from ipping_backend.ipdata import downloader
 from ipping_backend.ipdata.maxmind import MaxMind, MaxMindError
-from ipping_backend.ipdata.options import Credentials, IpDataOptions
+from ipping_backend.ipdata.options import IpDataOptions
 
-from .test_geoip import AMSTERDAM, TOKYO, asn_db, city_db, make_db
+from .test_geoip import AMSTERDAM, TOKYO, ask, asn_db, city_db, make_db
 
 ACCOUNT, KEY = "123456", "abcDEF0123456789_abcDEF0123456789"
 DEFAULT_PUBLISHED = datetime(2026, 11, 10, 3, 0, tzinfo=UTC)
@@ -160,13 +161,13 @@ def test_a_database_is_downloaded_checked_and_put_in_place(
     assert sorted(p.name for p in directory.iterdir()) == [
         "GeoLite2-City.mmdb"
     ]  # nothing left over
-    # MaxMind's file is used in preference to another that is newer: it is the one the administrator chose
+    # MaxMind's file and another source's newer one are two sources, each read as itself: no file is preferred by its name
     other = city_db(directory / "dbip-city-lite-2026-11.mmdb", TOKYO)
     os.utime(other, (time.time() + 600, time.time() + 600))
-    geoip = GeoIp(directory=directory)
-    place = geoip.place("93.184.216.34")
-    assert place is not None and place.name == "Amsterdam"
-    assert geoip.source == "MaxMind GeoLite2" and "MaxMind" in (geoip.attribution or "")
+    info = ask(GeoIp(directory=directory))
+    said = {s.id: s for s in info.sources}
+    assert said["maxmind"].said.city == "Amsterdam" and said["dbip"].said.city == "Tokyo"
+    assert "MaxMind" in (info.attribution or "") and "DB-IP" in (info.attribution or "")
 
 
 def test_the_credentials_go_to_maxmind_and_not_along_the_redirect(
@@ -296,83 +297,117 @@ def test_publication_is_asked_with_a_head_request(fake: FakeMaxMind) -> None:
 
 
 # ---------------------------------------------------------------------------------------------
-# Keeping them up to date
+# Keeping them up to date (MaxMind is one source of the downloader, like the others)
 # ---------------------------------------------------------------------------------------------
 
+KEYS = {"maxmind": {"account_id": ACCOUNT, "license_key": KEY}}
+OPTIONS = IpDataOptions()
 
-def _updater(tmp_path: Path, fake: FakeMaxMind) -> tuple[updater.MaxMindUpdater, GeoIp, Path]:
+
+def _updater(tmp_path: Path, fake: FakeMaxMind) -> tuple[downloader.DataUpdater, GeoIp, Path]:
     directory = tmp_path / "geoip"
     geoip = GeoIp(directory=directory)
     settings = Settings(geoip_dir=str(directory), database_url="sqlite+aiosqlite://")
     return (
-        updater.MaxMindUpdater(None, settings, geoip, transport=fake.transport()),
+        downloader.DataUpdater(
+            None,  # type: ignore[arg-type]
+            settings,
+            directory,
+            lambda: geoip,
+            transport=fake.transport(),
+        ),
         geoip,
         directory,
-    )  # type: ignore[arg-type]
+    )
 
 
-OPTIONS = IpDataOptions(maxmind_editions=["GeoLite2-City", "GeoLite2-ASN"])
-CREDENTIALS = Credentials(account_id=ACCOUNT, license_key=KEY, source="admin")
+def _update(
+    up: downloader.DataUpdater, keys: dict[str, dict[str, str]] = KEYS, *, force: bool = False
+) -> dict[str, Any]:
+    return asyncio.run(up.update(["maxmind"], keys=keys, force=force))
 
 
 def test_an_update_downloads_each_edition_and_records_it(tmp_path: Path, fake: FakeMaxMind) -> None:
     up, geoip, directory = _updater(tmp_path, fake)
-    assert geoip.place("93.184.216.34") is None  # nothing yet
-    status = asyncio.run(up.update(OPTIONS, CREDENTIALS))
-    assert status["error"] is None and status["last_success"] and not status["running"]
-    assert sorted(status["editions"]) == ["GeoLite2-ASN", "GeoLite2-City"]
-    assert all(
-        e["build_epoch"] > 0 and e["size"] > 0 and e["error"] is None
-        for e in status["editions"].values()
-    )
-    place, asn = geoip.place("93.184.216.34"), geoip.asn("93.184.216.34")
-    assert (
-        place is not None and place.name == "Amsterdam" and asn is not None and asn.number == 15133
-    )  # without a restart
-    assert updater.read_status(directory) == status  # kept for whichever process is asked
+    assert not ask(geoip).found  # nothing yet
+    status = _update(up)
+    entry = status["sources"]["maxmind"]
+    assert entry["error"] is None and entry["last_success"] and not entry["running"]
+    assert sorted(json.loads(entry["stamp"])) == ["GeoLite2-ASN", "GeoLite2-City"]
+    info = ask(geoip)  # without a restart
+    assert info.city == "Amsterdam" and info.asn == 15133
+    assert downloader.read_status(directory) == status  # kept for whichever process is asked
+    assert "123456" not in json.dumps(status) and KEY not in json.dumps(status)
 
 
 def test_an_edition_that_is_not_newer_is_not_downloaded_again(
     tmp_path: Path, fake: FakeMaxMind
 ) -> None:
     up, _, _ = _updater(tmp_path, fake)
-    asyncio.run(up.update(OPTIONS, CREDENTIALS))
+    _update(up)
     assert fake.gets("GeoLite2-City") == 1
-    asyncio.run(
-        up.update(OPTIONS, CREDENTIALS)
-    )  # MaxMind published before we downloaded: nothing to do
+    _update(up)  # MaxMind published before we downloaded: nothing to do
     assert fake.gets("GeoLite2-City") == 1 and fake.gets("GeoLite2-ASN") == 1
     fake.published = datetime.now(UTC) + timedelta(hours=1)  # something newer
-    asyncio.run(up.update(OPTIONS, CREDENTIALS))
+    _update(up)
     assert fake.gets("GeoLite2-City") == 2
-    asyncio.run(up.update(OPTIONS, CREDENTIALS, force=True))  # asked for by hand: no question first
+    _update(up, force=True)  # asked for by hand: no question first
     assert fake.gets("GeoLite2-City") == 3
+
+
+def test_files_from_before_the_stamps_are_not_downloaded_again(
+    tmp_path: Path, fake: FakeMaxMind
+) -> None:
+    """A server that updated before MaxMind became a source like the others has the files but no stamp: the file's age says."""
+    up, _, directory = _updater(tmp_path, fake)
+    directory.mkdir()
+    for edition, make in (("GeoLite2-City", city_db), ("GeoLite2-ASN", asn_db)):
+        make(directory / f"{edition}.mmdb")
+    _update(up)
+    assert fake.gets("GeoLite2-City") == 0 and fake.gets("GeoLite2-ASN") == 0
+    fake.published = datetime.now(UTC) + timedelta(hours=1)
+    _update(up)
+    assert fake.gets("GeoLite2-City") == 1
 
 
 def test_a_refused_key_is_recorded_and_stops_the_rest(tmp_path: Path, fake: FakeMaxMind) -> None:
     up, _, directory = _updater(tmp_path, fake)
-    bad = Credentials(account_id=ACCOUNT, license_key="wrongwrongwrongwrong1234", source="admin")
-    status = asyncio.run(up.update(OPTIONS, bad))
-    assert status["error"]["code"] == "refused" and KEY not in str(status)
-    assert status["editions"]["GeoLite2-City"]["error"] and "GeoLite2-ASN" not in status["editions"]
-    assert status["last_success"] is None and not (directory / "GeoLite2-City.mmdb").exists()
-    assert not updater.due(
-        OPTIONS, status, datetime.now(UTC) + timedelta(hours=1)
+    bad = {"maxmind": {"account_id": ACCOUNT, "license_key": "wrongwrongwrongwrong1234"}}
+    status = _update(up, bad)
+    entry = status["sources"]["maxmind"]
+    assert entry["error"]["code"] == "refused" and KEY not in str(status)
+    assert fake.gets("GeoLite2-City") == 0 and fake.gets("GeoLite2-ASN") == 0
+    assert entry.get("last_success") is None and not (directory / "GeoLite2-City.mmdb").exists()
+    assert not downloader.due(
+        "maxmind", OPTIONS, entry, datetime.now(UTC) + timedelta(hours=1)
     )  # not tried again at once
-    assert updater.due(OPTIONS, status, datetime.now(UTC) + timedelta(hours=7))
+    assert downloader.due("maxmind", OPTIONS, entry, datetime.now(UTC) + timedelta(hours=7))
+
+
+def test_one_edition_failing_does_not_lose_the_other(tmp_path: Path, fake: FakeMaxMind) -> None:
+    up, geoip, _ = _updater(tmp_path, fake)
+    fake.status_override["GeoLite2-ASN"] = 503
+    entry = _update(up)["sources"]["maxmind"]
+    assert entry["error"]["code"] == "unavailable"
+    assert ask(geoip).city == "Amsterdam"  # the City database arrived
+    assert list(json.loads(entry["stamp"])) == ["GeoLite2-City"]  # and is not downloaded again
+    fake.status_override.clear()
+    _update(up)
+    assert fake.gets("GeoLite2-City") == 1 and fake.gets("GeoLite2-ASN") == 1
 
 
 def test_when_the_next_check_is_due() -> None:
     now = datetime(2026, 11, 10, 12, 0, tzinfo=UTC)
     never: dict[str, Any] = {"last_attempt": None, "error": None}
-    assert updater.due(OPTIONS, never, now)
+    assert downloader.due("maxmind", OPTIONS, never, now)
     fine = {"last_attempt": (now - timedelta(hours=23)).isoformat(), "error": None}
-    assert not updater.due(OPTIONS, fine, now)
-    assert updater.due(
-        OPTIONS, {**fine, "last_attempt": (now - timedelta(hours=25)).isoformat()}, now
+    assert not downloader.due("maxmind", OPTIONS, fine, now)
+    assert downloader.due(
+        "maxmind", OPTIONS, {**fine, "last_attempt": (now - timedelta(hours=25)).isoformat()}, now
     )
-    assert updater.due(
-        IpDataOptions(maxmind_update_hours=6),
+    assert downloader.due(
+        "maxmind",
+        IpDataOptions(data_update_hours=6),
         {**fine, "last_attempt": (now - timedelta(hours=7)).isoformat()},
         now,
     )
@@ -380,34 +415,53 @@ def test_when_the_next_check_is_due() -> None:
         "last_attempt": (now - timedelta(minutes=30)).isoformat(),
         "error": {"code": "network"},
     }
-    assert not updater.due(OPTIONS, broken, now)
-    assert updater.due(
-        OPTIONS, {**broken, "last_attempt": (now - timedelta(minutes=70)).isoformat()}, now
+    assert not downloader.due("maxmind", OPTIONS, broken, now)
+    assert downloader.due(
+        "maxmind",
+        OPTIONS,
+        {**broken, "last_attempt": (now - timedelta(minutes=70)).isoformat()},
+        now,
+    )
+    # a source that is renewed less often than the administrator's interval is asked less often
+    day_old = {"last_attempt": (now - timedelta(hours=25)).isoformat(), "error": None}
+    assert not downloader.due("ipapi_is", OPTIONS, day_old, now)
+    assert downloader.due(
+        "ipapi_is",
+        OPTIONS,
+        {**day_old, "last_attempt": (now - timedelta(hours=169)).isoformat()},
+        now,
     )
 
 
 def test_one_process_per_directory_downloads(tmp_path: Path, fake: FakeMaxMind) -> None:
     up, _, directory = _updater(tmp_path, fake)
     directory.mkdir()
-    other = os.open(directory / updater.LOCK_FILE, os.O_CREAT | os.O_RDWR)
+    other = os.open(directory / downloader.LOCK_FILE, os.O_CREAT | os.O_RDWR)
     fcntl.flock(other, fcntl.LOCK_EX)  # another backend process is downloading
     try:
-        asyncio.run(up.update(OPTIONS, CREDENTIALS))
+        _update(up)
         assert fake.requests == []
     finally:
         os.close(other)
-    asyncio.run(up.update(OPTIONS, CREDENTIALS))
+    _update(up)
     assert fake.gets("GeoLite2-City") == 1
 
 
 def test_a_process_that_died_mid_update_does_not_leave_the_page_running(tmp_path: Path) -> None:
     directory = tmp_path / "geoip"
-    stale = {"running": True, "running_since": (datetime.now(UTC) - timedelta(hours=1)).isoformat()}
+    stale = {
+        "sources": {
+            "maxmind": {
+                "running": True,
+                "running_since": (datetime.now(UTC) - timedelta(hours=1)).isoformat(),
+            }
+        }
+    }
     directory.mkdir()
-    (directory / updater.STATUS_FILE).write_text(__import__("json").dumps(stale))
-    assert updater.read_status(directory)["running"] is False
-    (directory / updater.STATUS_FILE).write_text("not json")
-    assert (
-        updater.read_status(directory)["last_attempt"] is None
-    )  # an unreadable file is an empty one
-    assert updater.read_status(None)["editions"] == {}
+    (directory / downloader.STATUS_FILE).write_text(json.dumps(stale))
+    assert downloader.read_status(directory)["sources"]["maxmind"]["running"] is False
+    (directory / downloader.STATUS_FILE).write_text("not json")
+    assert downloader.read_status(directory) == {
+        "sources": {}
+    }  # an unreadable file is an empty one
+    assert downloader.read_status(None) == {"sources": {}}

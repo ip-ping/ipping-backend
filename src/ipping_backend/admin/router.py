@@ -301,7 +301,7 @@ async def update_node(
         setattr(node, key, value)
     handed_back = apply_edit(node, edited)
     if edited:  # a place that was typed may now agree, or disagree, with the data
-        await fill_if_enabled(db, node, request.app.state.geoip)
+        await fill_if_enabled(db, node, request.app.state.ipdata)
     await _audit(
         db,
         admin,
@@ -326,7 +326,7 @@ async def autofill_node(node_id: str, request: Request, admin: AdminUser, db: Db
         raise ApiError(
             409, "no_address", "The node has not connected yet, so there is no address to look up."
         )
-    changed = fill(node, request.app.state.geoip)
+    changed = fill(node, request.app.state.ipdata)
     await _audit(db, admin, request, "node.autofilled", node_id, fields=changed)
     await db.commit()
     return _admin_node(node, await _online(request, db))
@@ -517,12 +517,13 @@ async def service_status(request: Request, admin: AdminUser, db: Db) -> ServiceS
         .select_from(MeasurementTask)
         .where(MeasurementTask.status.in_(TASK_ACTIVE))
     )
-    geoip = request.app.state.geoip
+    ipdata = request.app.state.ipdata
+    knowing = [i.name for i in ipdata.knowing("position", "asn")]
     return ServiceStatus(
         geoip=GeoIpStatus(
-            city=geoip.has_city,
-            asn=geoip.has_asn,
-            source=geoip.source if geoip.has_city or geoip.has_asn else None,
+            city=ipdata.can("position"),
+            asn=ipdata.can("asn"),
+            source=", ".join(knowing) or None,
             geofeed_entries=request.app.state.geofeeds.entries,
         ),
         nodes_online=len(await _online(request, db)),
