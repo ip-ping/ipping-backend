@@ -32,7 +32,11 @@ LAST_SEEN_WRITE_INTERVAL_S = 60
 
 class EnrollRequest(BaseModel):
     token: str = Field(min_length=10, max_length=200)
-    name: str = Field(min_length=1, max_length=100)
+    name: str = Field(
+        default="",
+        max_length=100,
+        description="Optional. Without one the node is called after its place and its network (`City, CC - Provider · ASn`).",
+    )
     version: str = Field(default="unknown", max_length=32)
     country: str | None = Field(default=None, min_length=2, max_length=2)
     region: str | None = Field(default=None, max_length=100)
@@ -110,7 +114,7 @@ async def enroll(body: EnrollRequest, request: Request, db: Db) -> EnrollRespons
     secret = new_secret()
     node = Node(
         id=node_id,
-        name=body.name,
+        name=body.name.strip(),
         status="pending",
         credential_hash=hash_secret(secret),
         country=body.country.upper() if body.country else None,
@@ -132,7 +136,7 @@ async def enroll(body: EnrollRequest, request: Request, db: Db) -> EnrollRespons
             actor=f"node:{node_id}",
             action="node.enrolled",
             subject=node_id,
-            data={"name": body.name, "token_label": token.label},
+            data={"name": body.name.strip(), "token_label": token.label},
             source_ip=ip,
         )
     )
@@ -168,7 +172,7 @@ async def list_nodes(request: Request, db: Db) -> list[PublicNode]:
         result.append(
             PublicNode(
                 id=node.id,
-                name=node.name,
+                name=node.display_name,
                 country=node.country,
                 region=node.region,
                 city=node.city,

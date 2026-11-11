@@ -111,7 +111,7 @@ def _node_info(node: Node) -> schemas.NodeInfo:
     """A node as a result shows it, frozen when the measurement begins."""
     return schemas.NodeInfo(
         id=node.id,
-        name=node.name,
+        name=node.display_name,
         country=node.country,
         region=node.region,
         city=node.city,
@@ -412,11 +412,12 @@ class MeasurementEngine:
                 if detail.redacted:
                     raise TargetError(
                         "blocked_by_policy",
-                        f"{host} resolves to a private address on {node.name}, so it cannot be measured.",
+                        f"{host} resolves to a private address on {node.display_name}, so it cannot be measured.",
                     )
                 if detail.rcode != "NOERROR":
                     raise TargetError(
-                        "dns_failure", f"{node.name} could not resolve {host} ({detail.rcode})."
+                        "dns_failure",
+                        f"{node.display_name} could not resolve {host} ({detail.rcode}).",
                     )
                 found = [a.data for a in detail.answers if a.type == record_type]
                 if found:
@@ -481,7 +482,8 @@ class MeasurementEngine:
                         if isinstance(detail, proto.DnsDetail):
                             return detail
                         raise TargetError(
-                            "dns_failure", f"{node.name} did not answer the question about {host}."
+                            "dns_failure",
+                            f"{node.display_name} did not answer the question about {host}.",
                         )
                 if utcnow() >= give_up:
                     await self.cancel(measurement_id)
@@ -647,7 +649,7 @@ class MeasurementEngine:
                     node.version, request.transport, request.resolver
                 ):
                     eligible.append(node)
-        eligible.sort(key=lambda n: (n.country or "~", n.city or "~", n.name))
+        eligible.sort(key=lambda n: (n.country or "~", n.city or "~", n.display_name))
         if not eligible and online_approved and request.kind != "ping":
             what = f"{request.kind} measurement"
             if request.transport is not None and request.transport in proto.TRANSPORT_SINCE:

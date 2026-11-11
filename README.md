@@ -465,6 +465,11 @@ operator or users are. To redo this: `uv run python scripts/collect_atlas.py` (n
   Enrollment tokens expire (up to 30 days) and are single-use unless the administrator makes one **reusable** (any number of
   nodes can then enroll with it until it expires or is revoked; `uses` counts them); either way new nodes stay `pending`
   until an admin approves, so a leaked key cannot put a node into a measurement by itself.
+* **A node needs no name.** Enrolling without one (or with an empty one, which is what the node installer now does by default) calls
+  the node after where it is and whose network it is, `City, CC - Provider · ASn`, for example `Sydney, AU - OVH SAS · AS16276`
+  (the place falls back to the region, then the country; the provider and AS number come from the IP data or from an
+  administrator). The name follows the data, an administrator can still give a node a name, and clearing it brings the default back.
+  The API's `name` is always the name a node is shown by; `custom_name` (admin) is the one that was given.
 * **Revoking a node removes it.** It disappears from the lists, its credential is refused from then on, and the measurements it
   took part in keep their results (each carries the node as it was). A node that wants back in enrolls again and waits for
   approval like any new one. There is no way to rotate a node's credential: revoke the node and enroll it again.

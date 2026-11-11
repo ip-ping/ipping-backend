@@ -50,14 +50,25 @@ have been. The database migrates to `0013` (reusable enrollment keys); the estim
   to find), and the results it produced keep the node as it was. Rows revoked before this change are hidden from the list and swept
   by the maintenance run. The audit trail keeps `node.revoked` with the node's name.
 
+- **A node needs no name.** `name` may be left out or empty when a node enrolls, and may be cleared by an administrator: the node is
+  then called `City, CC - Provider · ASn` (for example `Sydney, AU - OVH SAS · AS16276`; the place falls back to the region, then
+  the country; the network falls back to whichever of the provider and the AS number is known; with nothing known, `Node abc123`).
+  It follows the data as the IP databases fill the place and the provider in. `name` in every answer (the public list, the admin
+  list, a measurement's nodes, the text output, estimates, messages) is the name a node is shown by; the admin list also has
+  `custom_name`, the one an administrator gave or the node enrolled with (empty: the default). Nodes that enrolled with a name keep
+  it. `nodes/naming.py` is the one place the default is made.
+- A test that looked for the typed text `pw` in a whole measurement could fail on a random id that happened to spell it; it now looks
+  at what was typed.
+
 ### Tests
-- Eight tests for enrollment and revocation (single-use as before, reusable counts and stops at revocation or expiry, 30 days,
+- Five tests for default names (the fallbacks, enrolling with no name, an empty one and a blank one, a given name kept and cleared,
+  the name following the data and being carried by a measurement). Eight tests for enrollment and revocation (single-use as before, reusable counts and stops at revocation or expiry, 30 days,
   community tier, a revoked node gone from both lists and refused, a legacy revoked row hidden and swept, no rotation endpoint).
   Three tests for the addresses endpoint (an owner, a stranger and a shared link, with the lookup API closed to administrators
   only; no database; a private report). Estimator tests for what used to be refusals (1 and 2 nodes, a node 140 ms away, nodes 3,600 km apart), for the figure's shape
   (never rising with the closest node's round trip, 1 to 99, headline equals the 500 km figure), and on the real data: no unicast
   fleet is flagged, every measurement gets an answer and a far one is `low`, the stated accuracy matches the held-out half, and 95%
-  or more of the anycast fleets are flagged. API tests for `accuracy` and `conflicting`. 467 pass on SQLite and 479 on PostgreSQL, ruff and mypy clean.
+  or more of the anycast fleets are flagged. API tests for `accuracy` and `conflicting`. 472 pass on SQLite, ruff and mypy clean.
 
 ## v0.9.0 (2026-11-10)
 

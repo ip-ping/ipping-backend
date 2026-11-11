@@ -289,7 +289,9 @@ def test_http_measurement_asks_for_the_name_and_keeps_only_validated_detail(api:
             follow_redirects=True,
             dns_mode="fixed",
         )
-        assert "secret" not in json.dumps(measurement) and "pw" not in json.dumps(measurement)
+        # only what the person typed is checked: the ids in the measurement are random and may spell anything
+        typed = json.dumps([measurement["target"], measurement["options"]])
+        assert "secret" not in typed and "pw" not in typed
         assert (
             measurement["options"]["path"] == "/a/b"
             and measurement["options"]["max_redirects"] == 5

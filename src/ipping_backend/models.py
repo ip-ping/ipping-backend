@@ -28,6 +28,8 @@ from sqlalchemy import (
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import TypeDecorator
 
+from .nodes.naming import node_label
+
 
 def utcnow() -> datetime:
     return datetime.now(UTC)
@@ -152,6 +154,19 @@ class Node(Base):
     created_at: Mapped[datetime] = mapped_column(UTCDateTime, default=utcnow)
     approved_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     last_seen_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
+
+    @property
+    def display_name(self) -> str:
+        """The name it is shown by: its own, or one made of its place and its network (see `nodes/naming.py`)."""
+        return node_label(
+            self.name,
+            city=self.city,
+            region=self.region,
+            country=self.country,
+            provider=self.provider,
+            asn=self.asn,
+            node_id=self.id,
+        )
 
 
 class Measurement(Base):

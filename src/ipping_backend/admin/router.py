@@ -186,7 +186,12 @@ async def revoke_enrollment_token(
 
 class AdminNode(BaseModel):
     id: str
-    name: str
+    name: str = Field(
+        description="What the node is shown by: its own name, or one made of its place and network"
+    )
+    custom_name: str = Field(
+        description="The name an administrator gave (or the node enrolled with); empty: the default is used"
+    )
     status: Literal["pending", "approved", "revoked"]
     online: bool
     country: str | None
@@ -213,7 +218,11 @@ class AdminNode(BaseModel):
 
 
 class UpdateNodeRequest(BaseModel):
-    name: str | None = Field(default=None, min_length=1, max_length=100)
+    name: str | None = Field(
+        default=None,
+        max_length=100,
+        description="Empty: the node is called after its place and its network again",
+    )
     country: str | None = Field(default=None, min_length=2, max_length=2)
     region: str | None = Field(default=None, max_length=100)
     city: str | None = Field(default=None, max_length=100)
@@ -234,7 +243,8 @@ def _admin_node(node: Node, online: dict[str, OnlineNode]) -> AdminNode:
     caps = connection.capabilities if connection else None
     return AdminNode(
         id=node.id,
-        name=node.name,
+        name=node.display_name,
+        custom_name=node.name,
         status=node.status,
         online=connection is not None,
         country=node.country,
@@ -283,6 +293,8 @@ async def update_node(
     changes = body.model_dump(exclude_unset=True)
     if "country" in changes and changes["country"]:
         changes["country"] = changes["country"].upper()
+    if "name" in changes:
+        changes["name"] = (changes["name"] or "").strip()  # empty: the default name
     # What an administrator types is theirs; an empty value hands the field back to the IP data (see nodes/autofill.py).
     edited = {k: changes.pop(k) for k in list(changes) if k in AUTO_FIELDS}
     for key, value in changes.items():
@@ -376,7 +388,7 @@ async def audit_node_location(
     ).scalars()
     # Plain values, copied now: the polling below must not touch ORM objects another session may change.
     known = {
-        n.id: (n.name, n.latitude, n.longitude)
+        n.id: (n.display_name, n.latitude, n.longitude)
         for n in rows
         if n.id in online
         and "ping" in online[n.id].capabilities.kinds
@@ -437,7 +449,7 @@ async def revoke_node(
     node = await _get_node(db, node_id)
     node.status = "revoked"
     snapshot = _admin_node(node, await _online(request, db))
-    await _audit(db, admin, request, "node.revoked", node_id, name=node.name)
+    await _audit(db, admin, request, "node.revoked", node_id, name=node.display_name)
     await db.execute(delete(NodeConnection).where(NodeConnection.node_id == node_id))
     await db.delete(node)
     await db.commit()

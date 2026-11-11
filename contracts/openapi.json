@@ -141,6 +141,11 @@
             "title": "Created At",
             "type": "string"
           },
+          "custom_name": {
+            "description": "The name an administrator gave (or the node enrolled with); empty: the default is used",
+            "title": "Custom Name",
+            "type": "string"
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -232,6 +237,7 @@
             "title": "Longitude"
           },
           "name": {
+            "description": "What the node is shown by: its own name, or one made of its place and network",
             "title": "Name",
             "type": "string"
           },
@@ -315,6 +321,7 @@
         "required": [
           "id",
           "name",
+          "custom_name",
           "status",
           "online",
           "country",
@@ -1229,8 +1236,9 @@
             "title": "Longitude"
           },
           "name": {
+            "default": "",
+            "description": "Optional. Without one the node is called after its place and its network (`City, CC - Provider \u00b7 ASn`).",
             "maxLength": 100,
-            "minLength": 1,
             "title": "Name",
             "type": "string"
           },
@@ -1272,8 +1280,7 @@
           }
         },
         "required": [
-          "token",
-          "name"
+          "token"
         ],
         "title": "EnrollRequest",
         "type": "object"
@@ -4661,13 +4668,13 @@
             "anyOf": [
               {
                 "maxLength": 100,
-                "minLength": 1,
                 "type": "string"
               },
               {
                 "type": "null"
               }
             ],
+            "description": "Empty: the node is called after its place and its network again",
             "title": "Name"
           },
           "provider": {
