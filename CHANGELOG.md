@@ -4,6 +4,9 @@ Progress log for `ipping-backend`, newest first. Each entry is one small, tested
 
 ## v0.11.0 (2026-11-11)
 
+Released and verified: the files match `SHA256SUMS` and carry attestations, and `ipping-backend:0.11.0` is on Docker Hub. The
+`ipping` v0.13.0 release pins it (`release-manifest.json` names backend v0.11.0, schema `0013`).
+
 The web interface's languages become settings. No database change (still `0013`: settings are rows of `app_settings`).
 
 - **Three new settings** an administrator changes in the admin page (or `PATCH /api/v1/admin/settings`): `languages_enabled` (which of
