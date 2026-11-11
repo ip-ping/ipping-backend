@@ -9,7 +9,7 @@ from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 
 from ..cluster import OnlineNode
 from ..deps import AdminUser, Db, Engine, client_ip, csrf_protect
@@ -22,6 +22,7 @@ from ..models import (
     Measurement,
     MeasurementTask,
     Node,
+    NodeConnection,
     new_id,
     utcnow,
 )
@@ -69,10 +70,17 @@ async def _audit(
 
 class CreateTokenRequest(BaseModel):
     label: str | None = Field(default=None, max_length=100)
-    ttl_minutes: int = Field(default=60, ge=1, le=24 * 60)
+    ttl_minutes: int = Field(default=60, ge=1, le=30 * 24 * 60)
     tier: Literal["official", "community"] = Field(
         default="official",
         description="community: for a volunteer's node. It is left out of measurements unless asked for.",
+    )
+    reusable: bool = Field(
+        default=False,
+        description=(
+            "Any number of nodes can enroll with it until it expires or is revoked (each still waits for "
+            "approval). Without this the first node to use it takes it."
+        ),
     )
 
 
@@ -89,14 +97,18 @@ class TokenOut(BaseModel):
     created_at: datetime
     expires_at: datetime
     state: Literal["active", "used", "expired", "revoked"]
-    node_id: str | None
+    node_id: str | None = Field(
+        description="The node that enrolled with it (the latest, when reusable)"
+    )
     tier: Literal["official", "community"] = "official"
+    reusable: bool = False
+    uses: int = Field(default=0, description="How many nodes have enrolled with it")
 
 
 def _token_state(token: EnrollmentToken) -> str:
     if token.revoked_at:
         return "revoked"
-    if token.used_at:
+    if token.used_at and not token.reusable:
         return "used"
     return "expired" if token.expires_at <= utcnow() else "active"
 
@@ -113,10 +125,18 @@ async def create_enrollment_token(
         created_by=admin.username,
         expires_at=utcnow() + timedelta(minutes=body.ttl_minutes),
         tier=body.tier,
+        reusable=body.reusable,
     )
     db.add(row)
     await _audit(
-        db, admin, request, "enrollment_token.created", row.id, label=body.label, tier=body.tier
+        db,
+        admin,
+        request,
+        "enrollment_token.created",
+        row.id,
+        label=body.label,
+        tier=body.tier,
+        reusable=body.reusable,
     )
     await db.commit()
     return TokenCreated(id=row.id, token=plaintext, expires_at=row.expires_at)
@@ -139,6 +159,8 @@ async def list_enrollment_tokens(admin: AdminUser, db: Db) -> list[TokenOut]:
             state=_token_state(r),
             node_id=r.node_id,
             tier=r.tier,
+            reusable=r.reusable,
+            uses=r.uses,
         )
         for r in rows
     ]
@@ -203,11 +225,6 @@ class UpdateNodeRequest(BaseModel):
     tier: Literal["official", "community"] | None = None
 
 
-class RotatedCredential(BaseModel):
-    node_id: str
-    credential: str = Field(description="Shown once. The node must be reconfigured with it.")
-
-
 async def _online(request: Request, db: Db) -> dict[str, OnlineNode]:
     return await request.app.state.cluster.online_nodes(db)  # type: ignore[no-any-return]
 
@@ -251,7 +268,9 @@ async def _get_node(db: Db, node_id: str) -> Node:
 
 @router.get("/nodes", response_model=list[AdminNode])
 async def admin_list_nodes(request: Request, admin: AdminUser, db: Db) -> list[AdminNode]:
-    nodes = (await db.execute(select(Node).order_by(Node.created_at))).scalars()
+    nodes = (
+        await db.execute(select(Node).where(Node.status != "revoked").order_by(Node.created_at))
+    ).scalars()
     online = await _online(request, db)
     return [_admin_node(n, online) for n in nodes]
 
@@ -412,32 +431,21 @@ async def approve_node(node_id: str, request: Request, admin: AdminUser, db: Db)
 async def revoke_node(
     node_id: str, request: Request, admin: AdminUser, db: Db, engine: Engine
 ) -> AdminNode:
+    """Cut a node off and remove it: it is gone from the lists, its credential is refused from now on, and what was
+    measured with it stays in the measurements (each result carries the node as it was). A node that wants back in enrolls
+    again and waits for approval like any new one."""
     node = await _get_node(db, node_id)
     node.status = "revoked"
-    await _audit(db, admin, request, "node.revoked", node_id)
+    snapshot = _admin_node(node, await _online(request, db))
+    await _audit(db, admin, request, "node.revoked", node_id, name=node.name)
+    await db.execute(delete(NodeConnection).where(NodeConnection.node_id == node_id))
+    await db.delete(node)
     await db.commit()
     # The node's socket may be held by any backend instance; tell them all.
     await request.app.state.cluster.command(
         {"type": "close", "node_id": node_id, "code": 4403, "reason": "revoked"}
     )
-    return _admin_node(node, await _online(request, db))
-
-
-@router.post("/nodes/{node_id}/rotate-credential", response_model=RotatedCredential)
-async def rotate_credential(
-    node_id: str, request: Request, admin: AdminUser, db: Db
-) -> RotatedCredential:
-    node = await _get_node(db, node_id)
-    if node.status == "revoked":
-        raise ApiError(409, "node_revoked", "A revoked node must enroll again.")
-    secret = new_secret()
-    node.credential_hash = hash_secret(secret)
-    await _audit(db, admin, request, "node.credential_rotated", node_id)
-    await db.commit()
-    await request.app.state.cluster.command(
-        {"type": "close", "node_id": node_id, "code": 4403, "reason": "credential rotated"}
-    )
-    return RotatedCredential(node_id=node_id, credential=f"{node_id}.{secret}")
+    return snapshot
 
 
 # ------------------------------------------------------------------------------------------

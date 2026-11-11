@@ -23,6 +23,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    false,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy.types import TypeDecorator
@@ -111,6 +112,10 @@ class EnrollmentToken(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     # What a node that enrolls with this token becomes: official | community (run by a volunteer).
     tier: Mapped[str] = mapped_column(String(16), default="official", server_default="official")
+    # A reusable token enrolls any number of nodes until it expires or is revoked; a single-use one is claimed by the first.
+    reusable: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    # How many nodes have enrolled with it (`node_id` is the latest).
+    uses: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
 
 class Node(Base):

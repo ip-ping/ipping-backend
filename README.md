@@ -126,7 +126,7 @@ Interactive docs are at `/api/docs`; the machine-readable contract is `contracts
 | `POST /api/v1/measurements/{id}/cancel`, `.../share` | cancel; make the link public |
 | `GET /api/v1/nodes` | the approved nodes, whether each is online, and the kinds it can run |
 | `POST /api/v1/nodes/enroll`, `WS /api/v1/nodes/connect` | what a node uses |
-| `/api/v1/admin/...` | nodes (approve, revoke, rotate credential), enrollment tokens, settings, audit, status |
+| `/api/v1/admin/...` | nodes (approve, revoke), enrollment tokens, settings, audit, status |
 | `GET /api/v1/text?target=...` | with an API key: start a measurement, wait, and get the result as plain text (for `curl` and the command-line client) |
 | `/api/v1/admin/ip-data` | the MaxMind account (the key is never sent back), the databases in use, and the lookup API's settings: `GET`, `PUT`, and `POST .../update` to download now |
 | `/api/v1/admin/api-keys/...` | API keys for scripts: create (shown once), change quotas, revoke |
@@ -462,7 +462,12 @@ operator or users are. To redo this: `uv run python scripts/collect_atlas.py` (n
   is `node_unavailable`. Nothing is added to the node: it is the same DNS check as any other.
 * Browser writes need a matching `Origin` and an `X-CSRF-Token`. Sessions are rotated at sign-in.
 * Node credentials and enrollment tokens are 256-bit random values stored only as hashes.
-  Enrollment tokens are single-use and expire; new nodes stay `pending` until an admin approves.
+  Enrollment tokens expire (up to 30 days) and are single-use unless the administrator makes one **reusable** (any number of
+  nodes can then enroll with it until it expires or is revoked; `uses` counts them); either way new nodes stay `pending`
+  until an admin approves, so a leaked key cannot put a node into a measurement by itself.
+* **Revoking a node removes it.** It disappears from the lists, its credential is refused from then on, and the measurements it
+  took part in keep their results (each carries the node as it was). A node that wants back in enrolls again and waits for
+  approval like any new one. There is no way to rotate a node's credential: revoke the node and enroll it again.
 * Authentication proves *which* node sent a result, not that it measured honestly.
 
 ## Running more than one process
@@ -526,7 +531,7 @@ first because the application release pins it.
 
 | Release | Database head | Notes |
 |---|---|---|
-| v0.10.0 | `0012` | **the location estimate is not strict any more**: an answer whenever any node with a position measured the address (fewer than 3 nodes, a far closest node and nodes that disagree are warnings, not refusals), an `accuracy` percentage measured on real targets (`accuracy.percent` within `radius_km`, `by_radius`), and `conflicting` when the nodes disagree (model `multilateration-5`; no database change) |
+| v0.10.0 | `0013` | **the location estimate is not strict any more**: an answer whenever any node with a position measured the address (fewer than 3 nodes, a far closest node and nodes that disagree are warnings, not refusals), an `accuracy` percentage measured on real targets (`accuracy.percent` within `radius_km`, `by_radius`), and `conflicting` when the nodes disagree (model `multilateration-5`); `GET /measurements/{id}/addresses`; **enrollment keys can be reusable** (migration `0013`, up to 30 days); **no node key rotation**; **a revoked node is removed** |
 | v0.9.0 | `0012` | **each node resolves a hostname itself by default** (`dns_mode` is `regional`; it was `fixed`), and `resolve_node_id` lets one chosen node resolve it for every node (migration `0012` adds `measurements.resolved_by`); the location estimate works for names the nodes resolved themselves, by the address each measured (`groups`, `?ip=`) |
 | v0.8.1 | `0011` | fix: a node's place from the IP data is only used where it agrees with the place the node reported or an administrator typed (a different country, a position or a known city more than 300 km away is a conflict; the provider and AS number are still filled in), and a record with no city is not used as a position |
 | v0.8.0 | `0011` | IP data: MaxMind GeoLite2 downloaded and kept up to date from the admin page, `GET /api/v1/ip`, and nodes filled in from their address (migration `0011` adds `nodes.auto_fields`) |
@@ -550,8 +555,8 @@ A node can be **official** (run by the people who run this service) or **communi
 is to let volunteers add vantage points without letting a stranger's machine speak for the service. This is a first
 slice with clear limits, not a trust system. What it does:
 
-* **A volunteer needs a token of their own.** In Admin > Enrollment, create a token with tier *community*; it is single-use
-  and labelled with who it is for, so there is always a person behind a node. The node that enrolls with it is a
+* **A volunteer needs a token of their own.** In Admin > Enrollment, create a token with tier *community*, single-use
+  (the default) and labelled with who it is for, so there is always a person behind a node. The node that enrolls with it is a
   community node and still waits for an administrator to approve it. An administrator can change a node's tier.
 * **They are left out unless asked for.** "All nodes" means the official ones. A measurement that sets
   `include_community` (the box on the measure form; `include_community=true` on `/api/v1/text`) also uses the online

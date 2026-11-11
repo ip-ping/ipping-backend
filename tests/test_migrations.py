@@ -44,7 +44,7 @@ def test_startup_refuses_an_unmigrated_database(tmp_path: Path) -> None:
 
     with pytest.raises(RuntimeError, match="ipping-backend migrate"):
         asyncio.run(check())
-    assert head_revision() == "0012"
+    assert head_revision() == "0013"
 
 
 def test_dns_is_enabled_for_deployments_that_never_narrowed_the_kinds(tmp_path: Path) -> None:

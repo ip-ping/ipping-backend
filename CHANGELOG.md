@@ -5,7 +5,7 @@ Progress log for `ipping-backend`, newest first. Each entry is one small, tested
 ## v0.10.0 (2026-11-10, not released yet)
 
 The location estimate is **not strict any more**: it always gives an estimate, with a percentage for how accurate answers like it
-have been. No database change (still `0012`); the model is now `multilateration-5`, so stored estimates are worked out again.
+have been. The database migrates to `0013` (reusable enrollment keys); the estimator model is now `multilateration-5`, so stored estimates are worked out again.
 
 ### What changed
 - **An answer whenever a node with a position took part.** It used to decline with fewer than 3 such nodes, with a closest node
@@ -40,12 +40,24 @@ have been. No database change (still `0012`); the model is now `multilateration-
 - **The README says what the design now is**: a best guess, always given, rather than an answer held back until it is safe: what
   that costs (85% of the answers are `low`, median 1,500 km) and what it buys, with the accuracy percentage as the reader's guide.
 
+- **Enrollment keys can be used again.** A token made `reusable` enrolls any number of nodes until it expires or is revoked (each new
+  node still waits for approval); `uses` counts them and `node_id` is the latest. Single-use stays the default. A key may now be good
+  for up to 30 days (it was 24 hours). Migration `0013` adds `enrollment_tokens.reusable` and `uses` (existing tokens stay
+  single-use; the ones already used count one use).
+- **Node credentials cannot be rotated any more**: `POST /admin/nodes/{id}/rotate-credential` is gone. To change a node's key, revoke
+  the node and enroll it again.
+- **A revoked node is removed**, not kept as a "revoked" row: it leaves the admin list at once, its credential is refused (nothing
+  to find), and the results it produced keep the node as it was. Rows revoked before this change are hidden from the list and swept
+  by the maintenance run. The audit trail keeps `node.revoked` with the node's name.
+
 ### Tests
-- Three tests for the addresses endpoint (an owner, a stranger and a shared link, with the lookup API closed to administrators
+- Eight tests for enrollment and revocation (single-use as before, reusable counts and stops at revocation or expiry, 30 days,
+  community tier, a revoked node gone from both lists and refused, a legacy revoked row hidden and swept, no rotation endpoint).
+  Three tests for the addresses endpoint (an owner, a stranger and a shared link, with the lookup API closed to administrators
   only; no database; a private report). Estimator tests for what used to be refusals (1 and 2 nodes, a node 140 ms away, nodes 3,600 km apart), for the figure's shape
   (never rising with the closest node's round trip, 1 to 99, headline equals the 500 km figure), and on the real data: no unicast
   fleet is flagged, every measurement gets an answer and a far one is `low`, the stated accuracy matches the held-out half, and 95%
-  or more of the anycast fleets are flagged. API tests for `accuracy` and `conflicting`. 456 pass, ruff and mypy clean.
+  or more of the anycast fleets are flagged. API tests for `accuracy` and `conflicting`. 467 pass on SQLite and 479 on PostgreSQL, ruff and mypy clean.
 
 ## v0.9.0 (2026-11-10)
 

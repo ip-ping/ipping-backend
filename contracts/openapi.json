@@ -912,6 +912,12 @@
             ],
             "title": "Label"
           },
+          "reusable": {
+            "default": false,
+            "description": "Any number of nodes can enroll with it until it expires or is revoked (each still waits for approval). Without this the first node to use it takes it.",
+            "title": "Reusable",
+            "type": "boolean"
+          },
           "tier": {
             "default": "official",
             "description": "community: for a volunteer's node. It is left out of measurements unless asked for.",
@@ -924,7 +930,7 @@
           },
           "ttl_minutes": {
             "default": 60,
-            "maximum": 1440.0,
+            "maximum": 43200.0,
             "minimum": 1.0,
             "title": "Ttl Minutes",
             "type": "integer"
@@ -3276,25 +3282,6 @@
         "title": "RedirectHop",
         "type": "object"
       },
-      "RotatedCredential": {
-        "properties": {
-          "credential": {
-            "description": "Shown once. The node must be reconfigured with it.",
-            "title": "Credential",
-            "type": "string"
-          },
-          "node_id": {
-            "title": "Node Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "node_id",
-          "credential"
-        ],
-        "title": "RotatedCredential",
-        "type": "object"
-      },
       "RuledOutOut": {
         "properties": {
           "distance_km": {
@@ -4547,7 +4534,13 @@
                 "type": "null"
               }
             ],
+            "description": "The node that enrolled with it (the latest, when reusable)",
             "title": "Node Id"
+          },
+          "reusable": {
+            "default": false,
+            "title": "Reusable",
+            "type": "boolean"
           },
           "state": {
             "enum": [
@@ -4567,6 +4560,12 @@
             ],
             "title": "Tier",
             "type": "string"
+          },
+          "uses": {
+            "default": 0,
+            "description": "How many nodes have enrolled with it",
+            "title": "Uses",
+            "type": "integer"
           }
         },
         "required": [
@@ -6168,6 +6167,7 @@
     },
     "/api/v1/admin/nodes/{node_id}/revoke": {
       "post": {
+        "description": "Cut a node off and remove it: it is gone from the lists, its credential is refused from now on, and what was\nmeasured with it stays in the measurements (each result carries the node as it was). A node that wants back in enrolls\nagain and waits for approval like any new one.",
         "operationId": "revoke_node_api_v1_admin_nodes__node_id__revoke_post",
         "parameters": [
           {
@@ -6203,48 +6203,6 @@
           }
         },
         "summary": "Revoke Node",
-        "tags": [
-          "admin"
-        ]
-      }
-    },
-    "/api/v1/admin/nodes/{node_id}/rotate-credential": {
-      "post": {
-        "operationId": "rotate_credential_api_v1_admin_nodes__node_id__rotate_credential_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "node_id",
-            "required": true,
-            "schema": {
-              "title": "Node Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RotatedCredential"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "summary": "Rotate Credential",
         "tags": [
           "admin"
         ]
@@ -7257,7 +7215,7 @@
     },
     "/api/v1/nodes/enroll": {
       "post": {
-        "description": "Exchange a single-use enrollment token for this node's own credential.",
+        "description": "Exchange an enrollment token for this node's own credential (a single-use token is taken by the first node).",
         "operationId": "enroll_api_v1_nodes_enroll_post",
         "requestBody": {
           "content": {

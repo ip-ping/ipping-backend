@@ -15,6 +15,7 @@ from .models import (
     Measurement,
     MeasurementEvent,
     MeasurementTask,
+    Node,
     Sample,
     WatchRun,
     WebSession,
@@ -81,6 +82,10 @@ async def run_once(sessionmaker: async_sessionmaker[AsyncSession]) -> dict[str, 
                     BackendInstance.heartbeat_at < now - timedelta(days=1)
                 )
             )
+        ).rowcount  # type: ignore[attr-defined]
+        # Nodes revoked before revoking removed them: they are gone from the lists, now from the table too.
+        removed["revoked_nodes"] = (
+            await db.execute(delete(Node).where(Node.status == "revoked"))
         ).rowcount  # type: ignore[attr-defined]
         removed["enrollment_tokens"] = (
             await db.execute(

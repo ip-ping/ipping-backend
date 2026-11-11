@@ -68,7 +68,7 @@ class PublicNode(BaseModel):
 
 @router.post("/enroll", response_model=EnrollResponse, status_code=201)
 async def enroll(body: EnrollRequest, request: Request, db: Db) -> EnrollResponse:
-    """Exchange a single-use enrollment token for this node's own credential."""
+    """Exchange an enrollment token for this node's own credential (a single-use token is taken by the first node)."""
     ip = client_ip(request) or "unknown"
     if not await allow(db, f"enroll:{ip}", 10, 60):
         raise ApiError(429, "rate_limited", "Too many enrollment attempts. Wait a minute.")
@@ -79,18 +79,33 @@ async def enroll(body: EnrollRequest, request: Request, db: Db) -> EnrollRespons
         )
     ).scalar_one_or_none()
     now = utcnow()
-    if token is None or token.revoked_at or token.used_at or token.expires_at <= now:
+    if (
+        token is None
+        or token.revoked_at
+        or token.expires_at <= now
+        or (token.used_at and not token.reusable)
+    ):
         raise ApiError(403, "invalid_token", "The enrollment token is invalid, used or expired.")
 
-    # Claim the token atomically so two simultaneous enrollments cannot both win.
     node_id = new_id()
-    claimed = await db.execute(
-        update(EnrollmentToken)
-        .where(EnrollmentToken.id == token.id, EnrollmentToken.used_at.is_(None))
-        .values(used_at=now, node_id=node_id)
-    )
-    if claimed.rowcount != 1:  # type: ignore[attr-defined]
-        raise ApiError(403, "invalid_token", "The enrollment token is invalid, used or expired.")
+    if token.reusable:
+        # Any number of nodes may enroll with it: count them, keep the latest (each waits for approval all the same).
+        await db.execute(
+            update(EnrollmentToken)
+            .where(EnrollmentToken.id == token.id)
+            .values(used_at=now, node_id=node_id, uses=EnrollmentToken.uses + 1)
+        )
+    else:
+        # Claim the token atomically so two simultaneous enrollments cannot both win.
+        claimed = await db.execute(
+            update(EnrollmentToken)
+            .where(EnrollmentToken.id == token.id, EnrollmentToken.used_at.is_(None))
+            .values(used_at=now, node_id=node_id, uses=1)
+        )
+        if claimed.rowcount != 1:  # type: ignore[attr-defined]
+            raise ApiError(
+                403, "invalid_token", "The enrollment token is invalid, used or expired."
+            )
 
     secret = new_secret()
     node = Node(
