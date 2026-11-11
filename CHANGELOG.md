@@ -5,7 +5,12 @@ Progress log for `ipping-backend`, newest first. Each entry is one small, tested
 ## v0.12.0 (2026-11-11)
 
 Nine IP data sources, each with a switch, and a majority vote with a percentage for every field. No database change (still `0013`: the
-switches and keys are rows of `app_settings`). Not released yet.
+switches and keys are rows of `app_settings`).
+
+Released and verified: the files match `SHA256SUMS` and carry attestations, `ipping-backend:0.12.0` is on Docker Hub and the `ipping` v0.15.0 release
+pins it. **The released image was run with nothing configured** (all sources on, online allowed, an empty data volume): it downloaded DB-IP,
+IPtoASN, IPdeny and both ip2region files by itself in 25 seconds, and eight sources voted for 8.8.8.8 (the real IPinfo, IPLocate, ipapi.is and
+IP2Location answered; MaxMind said it needs an account), 99% on the country, 97% on the city.
 
 - **Nine sources** beside the old single MaxMind: **DB-IP Lite**, **IPtoASN**, **IPdeny** and **ip2region** (databases the backend downloads and
   keeps up to date itself, no account needed) and **IPinfo**, **IPLocate**, **ipapi.is** and **IP2Location** (online; each works without a key at
