@@ -2,7 +2,7 @@
 
 Progress log for `ipping-backend`, newest first. Each entry is one small, tested step.
 
-## Unreleased
+## v0.14.0 (2026-11-12)
 
 The IP data vote measured, and mended where the measurement showed it wrong. No database change (still `0013`), no change to the API.
 

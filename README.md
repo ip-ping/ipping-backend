@@ -8,7 +8,7 @@ This repository is the coordinator. It validates targets, schedules work onto no
 aggregates results, estimates where an address appears to be, and owns the contracts the other two
 repositories build against.
 
-Current release: **v0.13.0** (database migration head `0013`). Nodes of any earlier version keep
+Current release: **v0.14.0** (database migration head `0013`). Nodes of any earlier version keep
 working for ping; TCP, HTTP and traceroute need node v0.3.0 or newer, DNS checks need node v0.4.0, traceroute rounds and certificate checks need node v0.5.0, and DNS over HTTPS and QUIC need node v0.6.0 (DNS over HTTPS to quad9 needs v0.7.0, which speaks HTTP/2); a measurement that asks for either goes only to nodes that have it.
 
 | Repository | Role |
@@ -631,6 +631,7 @@ first because the application release pins it.
 
 | Release | Database head | Notes |
 |---|---|---|
+| v0.14.0 | `0013` | **the IP data sources measured**: reliabilities found against RIPE Atlas anchors (country and position; MaxMind, IPinfo and IP2Location could not be measured and are trusted no more than the best that was), sources that are wrong together (IPtoASN and IPdeny, both registries) count as one witness, and the answer is the value with the highest percentage; the country is right 93.2% of the time on held-out anchors (90.8% before); no database change, no change to the API |
 | v0.13.0 | `0013` | **every IP data source is a downloaded database, all treated the same**: IPinfo Lite, IPLocate, ipapi.is and IP2Location LITE are downloaded and served from disk instead of being asked per lookup (no source's API is called any more), MaxMind is one source among nine in the admin page (its account ID and license key are that row's credentials), the location cross-check, a traceroute's networks and node autofill use the same vote, and a token can no longer reach a log; the admin API changes shape (`maxmind` block, `databases`, `kind` and `online` are gone, `sources` carries everything); no database change |
 | v0.12.0 | `0013` | **nine IP data sources and a vote**: DB-IP Lite, IPtoASN, IPdeny and ip2region (downloaded by the backend) and IPinfo, IPLocate, ipapi.is and IP2Location (online, optional keys) beside MaxMind, each with a switch (all on by default); the lookup answers every field with a percentage and lists every source; `IPPING_IPDATA_OFFLINE`; no database change |
 | v0.11.0 | `0013` | the web interface's languages are settings (`languages_enabled`, `default_language`, `language_auto_detect`) and `GET /api/v1/config` says what they are; no database change |
