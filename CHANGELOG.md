@@ -2,7 +2,7 @@
 
 Progress log for `ipping-backend`, newest first. Each entry is one small, tested step.
 
-## Unreleased
+## v0.15.0 (2026-11-12)
 
 Sponsored nodes. Database migration `0014`; one new field in the API, nothing removed.
 
