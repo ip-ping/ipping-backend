@@ -6,6 +6,8 @@ Progress log for `ipping-backend`, newest first. Each entry is one small, tested
 
 Sponsored nodes. Database migration `0014`; one new field in the API, nothing removed.
 
+Released and verified: the files match `SHA256SUMS`, the wheel, the lockfile and the contracts carry attestations (and a wheel altered after release is refused), `ipping-backend:0.15.0` is on Docker Hub for amd64 and arm64, and the wheel's hash is the one `ipping` v0.18.0's manifest names. Not done this time: the released images were not started together (the migration was run forward and back on PostgreSQL with rows, and the suite ran on PostgreSQL, before the release).
+
 - **A node can be sponsored.** `sponsored` is a flag on a node and on an enrollment token (the node that enrolls with a token takes its flag, as it takes
   its tier; an administrator can change it with `PATCH /admin/nodes/{id}`). It is said on every node of `GET /nodes` and on the `node` of every task
   of a measurement, so that the web interface can make the provider's name stand out where the node is shown. It is only a flag: it is independent of the tier
