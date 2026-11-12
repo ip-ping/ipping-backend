@@ -6,6 +6,13 @@ Progress log for `ipping-backend`, newest first. Each entry is one small, tested
 
 The IP data vote measured, and mended where the measurement showed it wrong. No database change (still `0013`), no change to the API.
 
+Released and verified: the files match `SHA256SUMS`, the wheel, the lockfile and the contracts carry attestations (and a wheel altered after release is
+refused), `ipping-backend:0.14.0` and `0.14` are on Docker Hub for amd64 and arm64 (one digest), the wheel holds `ipdata/measured.py`, the released contract says
+0.14.0 and its wheel's hash is the one `ipping` v0.17.1 pins. **The released image was run with nothing configured** (an empty data volume, online allowed, the released
+`ipping:0.17.1` in front of it): it downloaded the six sources that need no account by itself, all `ready`, and voted real addresses: `1.1.1.1` is Australia at 99% with
+IPtoASN's `US` outvoted (it was the case that showed the weakness), `8.8.8.8` is Mountain View at 99% for the country with all six agreeing. Run on PostgreSQL: 595 tests. Not run
+against a real account: MaxMind, IPinfo Lite and IP2Location LITE, so their reliabilities are the capped priors described above.
+
 - **The sources were measured.** `scripts/collect_anchors.py` writes `calibration/atlas-anchors.json.gz` (1,096 RIPE Atlas anchors with an IPv4
   and often an IPv6 address, the country and position their hosts registered, and the AS number), and `scripts/evaluate_ipdata.py` asks every
   source that has a database about all 2,112 addresses. As for the location model, the anchors are split in two by a fixed rule: the numbers in
