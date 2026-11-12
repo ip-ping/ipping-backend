@@ -289,6 +289,11 @@
             ],
             "title": "Remote Addr"
           },
+          "sponsored": {
+            "description": "The provider's name is made to stand out wherever the node is shown",
+            "title": "Sponsored",
+            "type": "boolean"
+          },
           "status": {
             "enum": [
               "pending",
@@ -334,6 +339,7 @@
           "location_verified",
           "auto_fields",
           "tier",
+          "sponsored",
           "location_audit",
           "version",
           "protocol_version",
@@ -923,6 +929,12 @@
             "default": false,
             "description": "Any number of nodes can enroll with it until it expires or is revoked (each still waits for approval). Without this the first node to use it takes it.",
             "title": "Reusable",
+            "type": "boolean"
+          },
+          "sponsored": {
+            "default": false,
+            "description": "A node that enrolls with it is sponsored: its provider's name is made to stand out wherever the node is shown.",
+            "title": "Sponsored",
             "type": "boolean"
           },
           "tier": {
@@ -2818,6 +2830,12 @@
             ],
             "title": "Region"
           },
+          "sponsored": {
+            "default": false,
+            "description": "Whether the node is sponsored: its provider's name is made to stand out. Frozen with the rest.",
+            "title": "Sponsored",
+            "type": "boolean"
+          },
           "tier": {
             "default": "official",
             "enum": [
@@ -3028,6 +3046,11 @@
               }
             ],
             "title": "Region"
+          },
+          "sponsored": {
+            "default": false,
+            "title": "Sponsored",
+            "type": "boolean"
           },
           "tier": {
             "default": "official",
@@ -4839,6 +4862,11 @@
             "title": "Reusable",
             "type": "boolean"
           },
+          "sponsored": {
+            "default": false,
+            "title": "Sponsored",
+            "type": "boolean"
+          },
           "state": {
             "enum": [
               "active",
@@ -4990,6 +5018,18 @@
               }
             ],
             "title": "Region"
+          },
+          "sponsored": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Make the node's provider's name stand out wherever the node is shown (it changes nothing else about the node)",
+            "title": "Sponsored"
           },
           "tier": {
             "anyOf": [

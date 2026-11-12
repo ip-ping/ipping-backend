@@ -114,6 +114,8 @@ class EnrollmentToken(Base):
     revoked_at: Mapped[datetime | None] = mapped_column(UTCDateTime, nullable=True)
     # What a node that enrolls with this token becomes: official | community (run by a volunteer).
     tier: Mapped[str] = mapped_column(String(16), default="official", server_default="official")
+    # Whether a node that enrolls with this token is sponsored (see `Node.sponsored`).
+    sponsored: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     # A reusable token enrolls any number of nodes until it expires or is revoked; a single-use one is claimed by the first.
     reusable: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     # How many nodes have enrolled with it (`node_id` is the latest).
@@ -145,6 +147,9 @@ class Node(Base):
     # unless it asks for them, never feed a location estimate until their place is verified, and are
     # rate limited (see `nodes/audit.py` and the README's "Community nodes").
     tier: Mapped[str] = mapped_column(String(16), default="official", server_default="official")
+    # A sponsored node's provider is named where the node is shown: the interface makes the provider's name stand out. It
+    # changes nothing else: a sponsored node is official or community as it was, and is measured and trusted the same.
+    sponsored: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
     # What the last location audit found: {status, summary, checked_at, address, evidence: [...]}.
     location_audit: Mapped[dict[str, Any] | None] = mapped_column(JSON, nullable=True)
     capabilities: Mapped[dict[str, Any]] = mapped_column(JSON, default=dict)

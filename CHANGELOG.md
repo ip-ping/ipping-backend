@@ -2,6 +2,22 @@
 
 Progress log for `ipping-backend`, newest first. Each entry is one small, tested step.
 
+## Unreleased
+
+Sponsored nodes. Database migration `0014`; one new field in the API, nothing removed.
+
+- **A node can be sponsored.** `sponsored` is a flag on a node and on an enrollment token (the node that enrolls with a token takes its flag, as it takes
+  its tier; an administrator can change it with `PATCH /admin/nodes/{id}`). It is said on every node of `GET /nodes` and on the `node` of every task
+  of a measurement, so that the web interface can make the provider's name stand out where the node is shown. It is only a flag: it is independent of the tier
+  (a volunteer's node can be sponsored) and changes nothing about how the node is chosen, limited, trusted or used in a location estimate. A result keeps what the
+  flag was when the measurement began, like the node's place and provider, and a result stored before this reads as not sponsored. The migration adds the
+  column to `nodes` and `enrollment_tokens` with everything existing not sponsored; it was run forward and back on SQLite and PostgreSQL with rows in both tables.
+- **A `null` for a flag no longer crashes `PATCH /admin/nodes/{id}`.** `{"tier": null}` and `{"location_verified": null}` were an unhandled database error
+  (`NOT NULL constraint failed`, a 500 on a real server); found while adding this flag, which has the same shape. A flag has no "unset", so `null` now leaves it as it is, for all three.
+- Tests: `tests/test_sponsored.py` (7: nothing is sponsored by default, token and administrator set it, `null`/omitted leave it, it is independent of the tier,
+  a result keeps what it was, an old result reads as not sponsored, the migration), each mutant caught (the result forgetting the flag, the token not giving it to the node, no guard against `null`).
+  590 pass on SQLite (12 need PostgreSQL) and 602 on PostgreSQL. The interface is the next step, in `ipping`.
+
 ## v0.14.0 (2026-11-12)
 
 The IP data vote measured, and mended where the measurement showed it wrong. No database change (still `0013`), no change to the API.

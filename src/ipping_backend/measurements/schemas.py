@@ -130,6 +130,10 @@ class NodeInfo(BaseModel):
     longitude: float | None = None
     location_verified: bool = False
     tier: Literal["official", "community"] = "official"
+    sponsored: bool = Field(
+        default=False,
+        description="Whether the node is sponsored: its provider's name is made to stand out. Frozen with the rest.",
+    )
 
 
 class Summary(BaseModel):

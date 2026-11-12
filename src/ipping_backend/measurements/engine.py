@@ -121,6 +121,7 @@ def _node_info(node: Node) -> schemas.NodeInfo:
         longitude=node.longitude,
         location_verified=node.location_verified,
         tier=node.tier,
+        sponsored=node.sponsored,
     )
 
 

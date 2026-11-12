@@ -75,6 +75,10 @@ class CreateTokenRequest(BaseModel):
         default="official",
         description="community: for a volunteer's node. It is left out of measurements unless asked for.",
     )
+    sponsored: bool = Field(
+        default=False,
+        description="A node that enrolls with it is sponsored: its provider's name is made to stand out wherever the node is shown.",
+    )
     reusable: bool = Field(
         default=False,
         description=(
@@ -101,6 +105,7 @@ class TokenOut(BaseModel):
         description="The node that enrolled with it (the latest, when reusable)"
     )
     tier: Literal["official", "community"] = "official"
+    sponsored: bool = False
     reusable: bool = False
     uses: int = Field(default=0, description="How many nodes have enrolled with it")
 
@@ -125,6 +130,7 @@ async def create_enrollment_token(
         created_by=admin.username,
         expires_at=utcnow() + timedelta(minutes=body.ttl_minutes),
         tier=body.tier,
+        sponsored=body.sponsored,
         reusable=body.reusable,
     )
     db.add(row)
@@ -136,6 +142,7 @@ async def create_enrollment_token(
         row.id,
         label=body.label,
         tier=body.tier,
+        sponsored=body.sponsored,
         reusable=body.reusable,
     )
     await db.commit()
@@ -159,6 +166,7 @@ async def list_enrollment_tokens(admin: AdminUser, db: Db) -> list[TokenOut]:
             state=_token_state(r),
             node_id=r.node_id,
             tier=r.tier,
+            sponsored=r.sponsored,
             reusable=r.reusable,
             uses=r.uses,
         )
@@ -206,6 +214,9 @@ class AdminNode(BaseModel):
         description="The fields filled in automatically from the node's address; the others were typed or reported"
     )
     tier: Literal["official", "community"]
+    sponsored: bool = Field(
+        description="The provider's name is made to stand out wherever the node is shown"
+    )
     location_audit: dict[str, Any] | None
     version: str | None
     protocol_version: int | None
@@ -232,6 +243,10 @@ class UpdateNodeRequest(BaseModel):
     asn: int | None = Field(default=None, ge=0, le=4_294_967_295)
     location_verified: bool | None = None
     tier: Literal["official", "community"] | None = None
+    sponsored: bool | None = Field(
+        default=None,
+        description="Make the node's provider's name stand out wherever the node is shown (it changes nothing else about the node)",
+    )
 
 
 async def _online(request: Request, db: Db) -> dict[str, OnlineNode]:
@@ -257,6 +272,7 @@ def _admin_node(node: Node, online: dict[str, OnlineNode]) -> AdminNode:
         location_verified=node.location_verified,
         auto_fields=list(node.auto_fields or []),
         tier=node.tier,
+        sponsored=node.sponsored,
         location_audit=node.location_audit,
         version=node.version,
         protocol_version=node.protocol_version,
@@ -295,6 +311,10 @@ async def update_node(
         changes["country"] = changes["country"].upper()
     if "name" in changes:
         changes["name"] = (changes["name"] or "").strip()  # empty: the default name
+    # a flag has no "unset": null leaves it as it is (it was an unhandled database error for these three)
+    for flag in ("tier", "location_verified", "sponsored"):
+        if changes.get(flag, True) is None:
+            del changes[flag]
     # What an administrator types is theirs; an empty value hands the field back to the IP data (see nodes/autofill.py).
     edited = {k: changes.pop(k) for k in list(changes) if k in AUTO_FIELDS}
     for key, value in changes.items():

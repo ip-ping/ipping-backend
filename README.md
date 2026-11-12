@@ -697,6 +697,22 @@ What it does **not** do, so nobody assumes it:
   so the protection stays what it is: left out by default, labelled when in, rate limited, never in a watch, never in an
   unverified location estimate.
 
+## Sponsored nodes
+
+A node can be **sponsored**: the provider that hosts it has given the node, and the web interface makes the provider's name
+stand out wherever the node is shown. It is a flag beside the tier and independent of it (a volunteer's node can be sponsored,
+and a sponsored node stays official or community as it was). It changes nothing else: a sponsored node is chosen, limited,
+trusted and used in a location estimate exactly as it was.
+
+* **Set on a token or on a node.** `sponsored` on `POST /api/v1/admin/enrollment-tokens` (the node that enrolls with it is
+  sponsored, as the tier works), or `{"sponsored": true}` on `PATCH /api/v1/admin/nodes/{id}`. A `null` leaves the flag as it is.
+* **Said in the results.** `sponsored` is on every node of `GET /api/v1/nodes` and on the `node` of every task of a measurement,
+  which keeps what the node was when the measurement began (as its place and provider): an older result stays as it was, and a
+  result stored before the flag existed is not sponsored.
+* **What stands out is the node's `provider`** (typed, or filled in from the IP data). A sponsored node with no provider has no
+  name to make stand out; the flag is kept for when it has one. The flag is the administrator's word: nothing checks that the
+  provider paid for anything, and the API carries no sponsor's name, link or logo of its own.
+
 ## Roadmap
 
 Small steps, each one committed and logged in [CHANGELOG.md](CHANGELOG.md).
@@ -717,6 +733,7 @@ Small steps, each one committed and logged in [CHANGELOG.md](CHANGELOG.md).
 - [x] Scheduled checks (watches) with quiet alerts to a webhook or ntfy, safe with several instances
 - [x] DNS checks (record types, public or per-node resolvers, privacy rules; the comparison view is in the web interface)
 - [x] Community nodes, first slice: a tier per node and token, left out unless asked for, rate limited, kept out of location estimates until verified, a location audit (no signed results or reputation)
+- [x] Sponsored nodes: a flag on a node and on its token, said in the node list and kept in each result, so the interface can make the provider's name stand out (database migration `0014`, unreleased)
 - [x] Traceroute in rounds like `mtr` (loss and spread per hop)
 - [x] QUIC as a transport of the certificate check (an h3 handshake over UDP)
 - [x] DNS over HTTPS as a transport of the DNS check (cloudflare, google and quad9; quad9 needs HTTP/2, so only nodes of v0.7.0 or newer are asked)

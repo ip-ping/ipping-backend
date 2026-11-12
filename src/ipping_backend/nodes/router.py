@@ -68,6 +68,7 @@ class PublicNode(BaseModel):
     ipv6: bool
     kinds: list[str]
     tier: Literal["official", "community"] = "official"
+    sponsored: bool = False
 
 
 @router.post("/enroll", response_model=EnrollResponse, status_code=201)
@@ -127,6 +128,7 @@ async def enroll(body: EnrollRequest, request: Request, db: Db) -> EnrollRespons
         version=body.version,
         remote_addr=ip,
         tier=token.tier,
+        sponsored=token.sponsored,
     )
     db.add(node)
     # what the node did not say about itself is filled in from the address it came from (see nodes/autofill.py)
@@ -185,6 +187,7 @@ async def list_nodes(request: Request, db: Db) -> list[PublicNode]:
                 ipv6=caps.ipv6,
                 kinds=caps.kinds,
                 tier=node.tier,
+                sponsored=node.sponsored,
             )
         )
     return result
