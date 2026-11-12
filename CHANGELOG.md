@@ -2,6 +2,40 @@
 
 Progress log for `ipping-backend`, newest first. Each entry is one small, tested step.
 
+## Unreleased
+
+The IP data vote measured, and mended where the measurement showed it wrong. No database change (still `0013`), no change to the API.
+
+- **The sources were measured.** `scripts/collect_anchors.py` writes `calibration/atlas-anchors.json.gz` (1,096 RIPE Atlas anchors with an IPv4
+  and often an IPv6 address, the country and position their hosts registered, and the AS number), and `scripts/evaluate_ipdata.py` asks every
+  source that has a database about all 2,112 addresses. As for the location model, the anchors are split in two by a fixed rule: the numbers in
+  the new, generated `ipdata/measured.py` come from the calibration half and are quoted from the test half. The old numbers become
+  `consensus.PRIORS` and are used where nothing was measured. The priors were too high: the country was right 93% of the time for DB-IP and IPLocate
+  (priors 96%), 84% for ipapi.is (95%), and 77 to 80% for IPtoASN, IPdeny and ip2region (93 to 94%).
+- **Sources that are wrong together are one witness.** Of the addresses where two sources were both wrong about the country, they gave the same
+  wrong one 41 to 94% of the time, and 81% for IPtoASN and IPdeny, which say where an address block is *registered* (a German data centre on an American
+  block is `US` to both). The vote assumed independent mistakes, so the two registries out-voted the databases that were right. They are now one
+  witness, with the more reliable of the two (`consensus.FAMILIES`); both are still listed with what they said. Putting the location databases in a
+  family too made the answer worse, so it was not done. This is the "IPtoASN is a weak voter on the country" item, mended by the data and not by
+  switching the source off: it is still the AS number's best source.
+- **The answer is the value with the highest percentage.** It used to be the value with the most votes, and the percentage was worked out
+  after. With sources of unequal reliability the two disagree: three weak sources against two strong ones answer the three, and the percentage
+  shown beside that answer is low because it rates the two higher. Tried on the held-out half with the measured reliabilities and the old
+  ordering, the country answers that the vote itself rated below 70% (32 of them) were right 12% of the time; with the new rule the 23 that
+  are rated below 70% are right 87% of the time. With sources of equal reliability it is still the plain majority.
+- **A source that could not be measured** (MaxMind, IPinfo, IP2Location: no account was available) is trusted no more than the best source that was,
+  for a field that was measured at all. Their claimed 98% over a measured 94% would have out-weighed sources nobody had doubted.
+- **The effect, on the test half** (1,062 addresses): the country is right 93.2% of the time (the v0.13.0 vote: 90.8%; DB-IP alone: 93.0%),
+  the position within 60 km 74.0% (71.6%); the Brier score of the percentages 0.065 for the country (0.090) and 0.181 for the position (0.194). Of
+  the 994 country answers shown at 97 to 99%, 94.6% were right: the percentages are still a little confident.
+- **What it does not say.** Anchors are well-run hosts in data centres and vendors know them, so every figure is an upper bound. The AS number is
+  measured and shown but **not fitted**: where three databases agree on it and the anchor registered another, the databases are usually right (the
+  anchor names its host's AS; 7% of them), so the anchors are not ground truth for it. Region, city, postal code, time zone and organization have
+  no ground truth in them and keep their priors. MaxMind, IPinfo and IP2Location were never run against a real account.
+- Tests: the sources that share mistakes (with the rule taken away, the registries win), the answer being the highest percentage (400 random
+  ballots), the cap on unmeasured sources, the generated table, the anchor snapshot and the scoring of the evaluation script; each of the three
+  rules was taken out in turn and a test failed.
+
 ## v0.13.0 (2026-11-11)
 
 Every IP data source is a database that is downloaded and served from disk, and all nine are treated the same. No database change (still `0013`).

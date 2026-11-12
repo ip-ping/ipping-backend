@@ -23,6 +23,7 @@ from ipping_backend.config import Settings
 from ipping_backend.geolocation.geoip import GeoIp
 from ipping_backend.ipdata import downloader, local
 from ipping_backend.ipdata.catalog import BY_ID, IDS
+from ipping_backend.ipdata.consensus import reliability
 from ipping_backend.ipdata.options import IpDataOptions
 from ipping_backend.ipdata.places import PlaceTable, ip2location_spans, ipapi_spans
 from ipping_backend.ipdata.places import build as build_places
@@ -175,11 +176,10 @@ def test_one_source_with_data_is_enough(tmp_path: Path) -> None:
     svc = service(tmp_path, ("iplocate",))
     info = svc.lookup(PUBLIC)
     assert info.found and (info.country, info.asn) == ("US", 15169) and info.source == "IPLocate"
-    assert info.confidence == {
-        "country": 96,
-        "asn": 98,
-        "organization": 93,
-    }  # IPLocate's own reliability
+    assert info.confidence == {  # IPLocate's own reliability, whatever the table says now
+        field: round(100 * reliability("iplocate", field))
+        for field in ("country", "asn", "organization")
+    }
     got = status(info)
     assert got["iplocate"] == "ok"
     assert (

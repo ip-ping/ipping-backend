@@ -395,26 +395,62 @@ node's own details all use the **same vote of every source that is on**, so no s
 * **`IPPING_IPDATA_OFFLINE=true`** stops every download, for a server that may not call out. What is already on disk still answers.
 
 **The vote.** Each field is voted on by the sources that have something for it, and **answered whenever at least one does**: one
-source of nine with data, the other eight empty, failed or off, still gives that one. The value with the most votes wins (a tie
-goes to the more reliable sources for that field), and the sources are held together: only those that agree on the country vote on
-the region, the city and the position, and only those that agree on the AS number vote on the organization. Places are compared
-as letters and digits without accents or case (`São Paulo` and `Sao Paulo`), organizations without their suffixes (`Google LLC`
-and `GOOGLE`), and positions that are within 60 km of each other are one vote, answered with the median of them.
+source of nine with data, the other eight empty, failed or off, still gives that one. The value with the most evidence wins, which is
+what the percentage below is made of, so the answer is always the one with the highest percentage (with sources that are equally
+reliable, the plain majority; a tie goes to the value with more sources, then to the source listed first). The sources are held
+together: only those that agree on the country vote on the region, the city and the position, and only those that agree on the AS
+number vote on the organization. Places are compared as letters and digits without accents or case (`São Paulo` and `Sao Paulo`),
+organizations without their suffixes (`Google LLC` and `GOOGLE`), and positions that are within 60 km of each other are one vote,
+answered with the median of them.
 
 **The percentage.** Every answered field says how likely it is to be right. Each source has a *reliability* for each kind of data
-(`ipdata/consensus.py`: country 93 to 98%, region 72 to 82%, city 62 to 72%, AS number 96 to 99%, and so on), and speaks with
-the odds `a / (1 - a)`. Sources that are right and wrong independently, and wrong in different ways, agree on a wrong value
-only by accident, so the odds of a value are the product of the odds of the sources that gave it, and
+(`ipdata/consensus.py` and `ipdata/measured.py`), and speaks with the odds `a / (1 - a)`. Sources that are right and wrong
+independently, and wrong in different ways, agree on a wrong value only by accident, so the odds of a value are the product of the
+odds of the sources that gave it, and
 
     percent = odds(value) / (1 + the odds of every value that was given)     (shown from 1 to 99, never 0 or 100)
 
 One source with a reliability of 80% gives 80%; two that agree give 94%; two that disagree give about 44% each; three against
-one give 93%. A city that one source gave and eight did not is answered with that source's own figure. **These reliabilities are
-priors, from what the vendors publish and from how much easier a country is than a city; they are not measured on your
-deployment**, and the percentage is an estimate of how sure the vote is, not a guarantee. Anycast addresses, hosting
-providers and carrier-grade NAT make every IP database wrong in the same way, and agreement does not fix that. (IPtoASN's country
-is its network's registration country, not where the address is: `1.1.1.1` is "US" there and Australia in every location source. It is
-outvoted, but it is a weaker voter on the country than its reliability says.)
+one give 93%. A city that one source gave and eight did not is answered with that source's own figure.
+
+**Sources that are wrong together are one witness.** They do not make their mistakes independently: on the addresses where two sources
+were both wrong about the country, they gave the *same* wrong country 41 to 94% of the time. IPtoASN and IPdeny are the clearest case, 81%:
+both say where an address block is *registered*, which is not where the address is (a German data centre on an American block is `US` to
+both; `1.1.1.1` is `US` to IPtoASN and Australia in every location source). So the two count as one witness, with the more reliable of
+them, in every vote (`FAMILIES`). Counted separately they out-voted the databases that were right. Both are still listed with what they
+said, and IPtoASN is still the AS number's best source. Putting the location databases in one family too made the answer worse, so
+they stay separate.
+
+**How the reliabilities were found.** `scripts/evaluate_ipdata.py` asks every source with a database about each of 2,112 addresses of
+RIPE Atlas anchors (1,096 anchors; `calibration/atlas-anchors.json.gz`, from `scripts/collect_anchors.py`), whose country and position
+their hosts registered. Anchors are split in two by a fixed rule, as for the location model: the numbers in `ipdata/measured.py` come
+from the calibration half and the ones below are the held-out test half.
+
+| Source | Country right | Position within 60 km | AS number (not fitted, see below) |
+| --- | --- | --- | --- |
+| DB-IP Lite | 93.0% of 1,062 | 73.1% | 91.1% |
+| IPLocate | 93.1% of 1,062 | (no position in its files) | 92.5% |
+| ipapi.is | 84.0% of 995 (94% answered) | 61.1% | (none in its files) |
+| IPtoASN | 78.7% of 1,050 | none | 91.9% |
+| ip2region | 79.5% of 1,062 | none | none |
+| IPdeny | 77.4% of 1,061 | none | none |
+| MaxMind, IPinfo, IP2Location | **not measured: they need an account** | | |
+
+On the same test half, the vote answers the country right 93.2% of the time (the vote of v0.13.0, with unmeasured reliabilities
+and each source counted: 90.8%; DB-IP alone: 93.0%), and the position 74.0% (71.6% before). The percentages are better calibrated
+too: the Brier score (0 is perfect, 0.25 a coin toss) is 0.065 for the country, from 0.090, and 0.181 for the position, from 0.194.
+Of the 994 country answers shown at 97 to 99%, 94.6% were right.
+
+What this does not say. **Anchors are easier than the typical address** (well-run hosts in data centres, and vendors know them), so these
+are upper bounds, and the ranking is what the vote uses, not the size. **The AS number is shown and not fitted:** where three databases
+agree on it and the anchor registered another, the databases are usually right (the anchor names its host's AS, not the one the address
+is announced from; 7% of them), so the anchors are not ground truth for it, and the AS number keeps its prior. Region, city, postal
+code, time zone and organization have no ground truth in the anchors and keep theirs. **A source that could not be measured**
+(MaxMind, IPinfo, IP2Location: no account was available) **is trusted no more than the best source that was** for a field that was
+measured at all, because what a vendor says about itself cannot be set beside numbers found the same way for the others. Measure again
+with your own databases and accounts: `scripts/evaluate_ipdata.py --dir DIR --fit` rewrites `ipdata/measured.py` (then run the tests).
+Anycast addresses, hosting providers and carrier-grade NAT make every IP database wrong in the same way, and agreement does not fix
+that; the percentage is an estimate of how sure the vote is, not a guarantee.
 
 **The lookup API.** `GET /api/v1/ip/{address}` (and `GET /api/v1/ip` for the caller's own address, which is the real
 visitor's behind a proxy that is set up as the installer does) answers every field with its percentage, and lists every source:
@@ -690,6 +726,7 @@ Small steps, each one committed and logged in [CHANGELOG.md](CHANGELOG.md).
 - [x] Estimated network location: constraint-based, evidence listed, always an answer when any node with a position took part, with an accuracy percentage measured on real targets and the disagreement of nodes (anycast) said, not refused
 - [x] Calibrate the location model against real targets of known location (RIPE Atlas anchors; held-out half reported)
 - [x] Nine IP data sources with a switch each (all on), optional keys for the online ones, and a majority vote with a percentage for every field
+- [x] The IP data sources measured against RIPE Atlas anchors: reliabilities from data (country and position; MaxMind, IPinfo and IP2Location not measured, no account), registries counted as one witness
 - [x] Every IP data source is a downloaded database served from disk (never a source's API), all treated the same in the admin page and in every use of the data, with a key field where the free download needs an account
 - [x] MaxMind GeoLite2 from the admin page (account ID and license key, downloaded, checked, kept up to date), a lookup API at `/api/v1/ip` with settings, and nodes filled in from their address
 - [x] Name resolution is a choice: each node resolves a hostname itself (default), or one chosen node resolves it for all; the location estimate follows the address each node measured
